@@ -32,7 +32,10 @@ router.post("/chat", async (req, res): Promise<void> => {
       ...(parsed.data.history ?? []).map((item) => ({ role: item.role, content: item.content })),
       { role: "user", content: parsed.data.message },
     ];
-    const response = await fetch("https://api.mistral.ai/v1/chat/completions", { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` }, body: JSON.stringify({ model: process.env.MISTRAL_MODEL || "mistral-small-latest", messages, temperature: 0.2, max_tokens: 700 }) });
+    const response = (await fetch("https://api.mistral.ai/v1/chat/completions", { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` }, body: JSON.stringify({ model: process.env.MISTRAL_MODEL || "mistral-small-latest", messages, temperature: 0.2, max_tokens: 700 }) })) as unknown as {
+      ok: boolean;
+      json: () => Promise<unknown>;
+    };
     if (!response.ok) { res.status(502).json({ error: "Mistral could not answer right now." }); return; }
     const result = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
     res.json({ answer: result.choices?.[0]?.message?.content?.trim() || "I could not find an answer in the school system." });
