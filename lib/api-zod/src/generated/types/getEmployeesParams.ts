@@ -5,7 +5,7 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
-import type { GetEmployeesStatus } from './getEmployeesStatus';
+import type { GetEmployeesStatus } from './getEmployeesStatus.js';
 
 export type GetEmployeesParams = {
 search?: string;

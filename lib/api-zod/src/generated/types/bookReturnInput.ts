@@ -5,7 +5,7 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
-import type { BookReturnInputCondition } from './bookReturnInputCondition';
+import type { BookReturnInputCondition } from './bookReturnInputCondition.js';
 
 export interface BookReturnInput {
   condition?: BookReturnInputCondition;

@@ -5,6 +5,6 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
-import type { StudentInput } from './studentInput';
+import type { StudentInput } from './studentInput.js';
 
 export type StudentUpdate = StudentInput;

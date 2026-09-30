@@ -5,7 +5,7 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
-import type { BorrowInputBorrowerType } from './borrowInputBorrowerType';
+import type { BorrowInputBorrowerType } from './borrowInputBorrowerType.js';
 
 export interface BorrowInput {
   bookId: number;

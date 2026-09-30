@@ -5,7 +5,7 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
-import type { EmployeeInputStatus } from './employeeInputStatus';
+import type { EmployeeInputStatus } from './employeeInputStatus.js';
 
 export interface EmployeeInput {
   /** @minLength 1 */

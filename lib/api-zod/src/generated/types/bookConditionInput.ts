@@ -5,7 +5,7 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
-import type { BookConditionInputAction } from './bookConditionInputAction';
+import type { BookConditionInputAction } from './bookConditionInputAction.js';
 
 export interface BookConditionInput {
   action: BookConditionInputAction;

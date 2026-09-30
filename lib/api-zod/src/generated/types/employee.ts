@@ -5,7 +5,7 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
-import type { EmployeeStatus } from './employeeStatus';
+import type { EmployeeStatus } from './employeeStatus.js';
 
 export interface Employee {
   id: number;

@@ -5,9 +5,9 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
-import type { TeacherUpdateGender } from './teacherUpdateGender';
-import type { TeacherUpdateMaritalStatus } from './teacherUpdateMaritalStatus';
-import type { TeacherUpdateStatus } from './teacherUpdateStatus';
+import type { TeacherUpdateGender } from './teacherUpdateGender.js';
+import type { TeacherUpdateMaritalStatus } from './teacherUpdateMaritalStatus.js';
+import type { TeacherUpdateStatus } from './teacherUpdateStatus.js';
 
 export interface TeacherUpdate {
   /** @minLength 1 */

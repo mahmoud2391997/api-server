@@ -5,7 +5,7 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
-import type { StudentStatus } from './studentStatus';
+import type { StudentStatus } from './studentStatus.js';
 
 export interface Student {
   id: number;

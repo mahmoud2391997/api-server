@@ -5,7 +5,7 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
-import type { GetTeachersStatus } from './getTeachersStatus';
+import type { GetTeachersStatus } from './getTeachersStatus.js';
 
 export type GetTeachersParams = {
 search?: string;

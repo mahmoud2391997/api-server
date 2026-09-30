@@ -5,7 +5,7 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
-import type { Activity } from './activity';
+import type { Activity } from './activity.js';
 
 export interface DashboardSummary {
   students: number;

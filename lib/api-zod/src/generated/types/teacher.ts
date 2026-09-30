@@ -5,7 +5,7 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
-import type { TeacherStatus } from './teacherStatus';
+import type { TeacherStatus } from './teacherStatus.js';
 
 export interface Teacher {
   id: number;

@@ -29,7 +29,7 @@ The API listens on `API_PORT` (default 3000 when using `start-local.sh`) or `POR
 
 Deploy this repository as a separate Vercel project with the repository root as its Root Directory. Vercel detects the Express app exported from `src/app.ts` and serves it as a single Node.js Function; all existing `/api/*` routes are handled by Express. `src/index.ts` is only the local/container listener. See [Express on Vercel](https://vercel.com/docs/frameworks/backend/express).
 
-The checked-in `vercel.json` runs `pnpm install --frozen-lockfile` and `pnpm run vercel-build`. That build typechecks the source and creates the production bundle. No Output Directory is needed, and this function deployment does not use the Dockerfile.
+The checked-in `vercel.json` runs `pnpm install --frozen-lockfile` and `pnpm run vercel-build`. The build emits JavaScript for both workspace packages before the function is packaged, and `includeFiles` adds those outputs to the Express Function. This avoids runtime imports of uncompiled `.ts` workspace sources. No Output Directory is needed, and this function deployment does not use the Dockerfile.
 
 To reproduce the build locally:
 

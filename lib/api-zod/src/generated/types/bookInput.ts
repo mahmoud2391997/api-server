@@ -5,8 +5,8 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
-import type { BookInputLanguage } from './bookInputLanguage';
-import type { BookInputStatus } from './bookInputStatus';
+import type { BookInputLanguage } from './bookInputLanguage.js';
+import type { BookInputStatus } from './bookInputStatus.js';
 
 export interface BookInput {
   /** @minLength 1 */

@@ -1,5 +1,5 @@
-export * from "./generated/api";
-export * from "./generated/types";
+export * from "./generated/api.js";
+export * from "./generated/types/index.js";
 
 // Keep the route schemas explicit so workspace consumers receive these exports
 // consistently in both source and declaration builds.
@@ -34,4 +34,4 @@ export {
   UpdateBookBody,
   UpdateBookParams,
   UpdateBookResponse,
-} from "./generated/api";
+} from "./generated/api.js";

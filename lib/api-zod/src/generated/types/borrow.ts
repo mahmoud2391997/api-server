@@ -5,8 +5,8 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
-import type { BorrowBorrowerType } from './borrowBorrowerType';
-import type { BorrowCondition } from './borrowCondition';
+import type { BorrowBorrowerType } from './borrowBorrowerType.js';
+import type { BorrowCondition } from './borrowCondition.js';
 
 export interface Borrow {
   id: number;

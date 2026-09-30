@@ -4,6 +4,7 @@
 
 - [x] Vendor the matching `@workspace/db` and `@workspace/api-zod` sources into this standalone repository.
 - [x] Declare the local pnpm workspace and commit `pnpm-lock.yaml`.
+- [x] Compile workspace packages to Node-compatible JavaScript and include their output in the Vercel Function.
 - [x] Keep the Express app exported from the Vercel-recognized `src/app.ts` entrypoint; use `src/index.ts` only for local/container listening.
 - [x] Configure Vercel install and build commands in `vercel.json`.
 - [x] Run the same `vercel-build` script locally before deploy.

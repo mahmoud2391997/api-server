@@ -5,8 +5,8 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
-import type { BookLanguage } from './bookLanguage';
-import type { BookStatus } from './bookStatus';
+import type { BookLanguage } from './bookLanguage.js';
+import type { BookStatus } from './bookStatus.js';
 
 export interface Book {
   id: number;

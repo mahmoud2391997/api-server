@@ -5,6 +5,6 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
-import type { EmployeeInput } from './employeeInput';
+import type { EmployeeInput } from './employeeInput.js';
 
 export type EmployeeUpdate = EmployeeInput;
