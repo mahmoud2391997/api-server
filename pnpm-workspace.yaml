@@ -1,0 +1,8 @@
+packages:
+  - lib/api-zod
+  - lib/db
+catalog:
+  drizzle-orm: ^0.45.2
+  zod: ^3.25.76
+allowBuilds:
+  esbuild: true
