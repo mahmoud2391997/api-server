@@ -1,0 +1,13 @@
+{
+  "buildCommand": "pnpm run build",
+  "outputDirectory": "dist",
+  "framework": null,
+  "functions": {
+    "api/**/*.js": {
+      "runtime": "nodejs20.x"
+    }
+  },
+  "env": {
+    "NODE_ENV": "production"
+  }
+}

@@ -1,0 +1,72 @@
+version: '3.8'
+
+services:
+  api-server:
+    build:
+      context: ..
+      dockerfile: artifacts/api-server/Dockerfile
+    container_name: al-bassam-school-api
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: production
+      API_PORT: 3000
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/al_bassam_school
+      MONGODB_URI: mongodb://mongodb:27017
+      MONGODB_DB: al_bassam_school
+      FRONTEND_URL: http://localhost:5173
+      LOG_LEVEL: info
+      MISTRAL_API_KEY: ${MISTRAL_API_KEY}
+      MISTRAL_MODEL: mistral-small-latest
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mongodb:
+        condition: service_healthy
+    networks:
+      - al-bassam-network
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: al-bassam-school-db
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: al_bassam_school
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - al-bassam-network
+    restart: unless-stopped
+
+  mongodb:
+    image: mongo:7-alpine
+    container_name: al-bassam-school-mongodb
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - al-bassam-network
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  mongodb_data:
+
+networks:
+  al-bassam-network:
+    driver: bridge

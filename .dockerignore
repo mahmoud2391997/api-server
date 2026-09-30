@@ -1,0 +1,14 @@
+node_modules
+dist
+.git
+.gitignore
+.env
+.env.local
+.env.*.local
+.DS_Store
+*.log
+coverage
+.nyc_output
+.replit
+.replit-artifact
+.qodo
