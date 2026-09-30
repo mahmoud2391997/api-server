@@ -93,26 +93,44 @@ docker run -p 3000:3000 \
 
 ## Vercel Deployment
 
-The API server is configured for Vercel deployment with `vercel.json`.
+The API server should be deployed as a separate Vercel project from the main frontend application.
 
-1. Install Vercel CLI:
+**Important:** This API server uses pnpm workspaces and cannot be deployed using Vercel's standard deployment from a subdirectory. It must be deployed as a standalone project.
+
+For Vercel deployment, you have two options:
+
+### Option 1: Deploy the standalone api-server repository
+This repository is already set up as a standalone project at `https://github.com/mahmoud2391997/api-server.git`.
+
+1. Clone the api-server repository:
 ```bash
-npm i -g vercel
+git clone https://github.com/mahmoud2391997/api-server.git
+cd api-server
 ```
 
-2. Deploy:
+2. Install dependencies:
 ```bash
-cd artifacts/api-server
+pnpm install
+```
+
+3. Deploy to Vercel:
+```bash
+npm i -g vercel
 vercel
 ```
 
-3. Set environment variables in Vercel dashboard:
+4. Set environment variables in Vercel dashboard:
    - `DATABASE_URL`
    - `MONGODB_URI`
    - `MONGODB_DB`
    - `FRONTEND_URL`
    - `MISTRAL_API_KEY`
    - `MISTRAL_MODEL`
+
+### Option 2: Use Docker on Vercel (recommended)
+For better compatibility with workspace dependencies, use Docker deployment on Vercel or another platform.
+
+See the Docker deployment section above for instructions.
 
 ## API Endpoints
 
