@@ -155,6 +155,17 @@ export const borrowsTable = pgTable("borrows", {
   condition: text("condition").notNull().default("good"),
 });
 
+export const studentAccessTable = pgTable("student_access", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  schoolId: integer("school_id").notNull().references(() => schoolsTable.id, { onDelete: "cascade" }),
+  mode: text("mode").notNull().default("shared"),
+  passwordHash: text("password_hash").notNull(),
+  studentId: integer("student_id").references(() => studentsTable.id, { onDelete: "set null" }),
+  isActive: boolean("is_active").notNull().default(true),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({ schoolModeStudentUnique: uniqueIndex("student_access_school_id_mode_student_id_idx").on(table.schoolId, table.mode, table.studentId) }));
+
 export const insertSchoolSchema = createInsertSchema(schoolsTable);
 export const insertAcademicYearSchema = createInsertSchema(academicYearsTable);
 export const insertStudentSchema = createInsertSchema(studentsTable);
@@ -164,6 +175,7 @@ export const insertBookCopySchema = createInsertSchema(bookCopiesTable);
 export const insertBookSchema = createInsertSchema(booksTable);
 export const insertBorrowSchema = createInsertSchema(borrowsTable);
 export const insertAttendanceSchema = createInsertSchema(attendanceTable);
+export const insertStudentAccessSchema = createInsertSchema(studentAccessTable);
 
 export type InsertSchool = z.infer<typeof insertSchoolSchema>;
 export type School = typeof schoolsTable.$inferSelect;
@@ -183,3 +195,5 @@ export type InsertBorrow = z.infer<typeof insertBorrowSchema>;
 export type Borrow = typeof borrowsTable.$inferSelect;
 export type InsertAttendance = z.infer<typeof insertAttendanceSchema>;
 export type Attendance = typeof attendanceTable.$inferSelect;
+export type InsertStudentAccess = z.infer<typeof insertStudentAccessSchema>;
+export type StudentAccess = typeof studentAccessTable.$inferSelect;

@@ -1,3 +1,6 @@
+-- Ensure pgcrypto extension is available for digest() function
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
 -- Store only one-way hashes of school API keys.
 ALTER TABLE schools ADD COLUMN IF NOT EXISTS api_key_hash TEXT NOT NULL DEFAULT '';
 ALTER TABLE schools ADD COLUMN IF NOT EXISTS api_key_prefix TEXT NOT NULL DEFAULT '';

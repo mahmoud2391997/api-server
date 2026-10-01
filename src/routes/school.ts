@@ -1,11 +1,12 @@
 import { Router, type IRouter } from "express";
 import { and, desc, eq, ilike, isNull, or, sql, gte, lte } from "drizzle-orm";
 import { db } from "@workspace/db";
-import { academicYearsTable, attendanceTable, booksTable, bookCopiesTable, borrowsTable, employeesTable, studentsTable, teachersTable } from "@workspace/db/schema";
+import { academicYearsTable, attendanceTable, booksTable, bookCopiesTable, borrowsTable, employeesTable, studentsTable, teachersTable, studentAccessTable } from "@workspace/db/schema";
 import { z } from "zod";
 import { getStudentLibraryFromMongo, syncLibraryToMongo } from "../lib/mongodb.js";
 import type { AuthenticatedRequest } from "../middlewares/auth.js";
 import { logger } from "../lib/logger.js";
+import argon2 from "argon2";
 
 const MAX_GRADE = 12;
 const ARABIC_GRADES = ["الأول ابتدائي", "الثاني ابتدائي", "الثالث ابتدائي", "الرابع ابتدائي", "الخامس ابتدائي", "السادس ابتدائي", "الأول متوسط", "الثاني متوسط", "الثالث متوسط", "الأول ثانوي", "الثاني ثانوي", "الثالث ثانوي"];
@@ -31,17 +32,17 @@ function academicYearForDate(date = new Date()) {
   return { startYear, label: `${startYear} / ${startYear + 1}`, startDate: `${startYear}-09-01`, endDate: `${startYear + 1}-06-30` };
 }
 
-async function ensureCurrentAcademicYear(now = new Date()): Promise<void> {
+async function ensureCurrentAcademicYear(now = new Date(), schoolId: number): Promise<void> {
   const target = academicYearForDate(now);
   await db.transaction(async (tx) => {
-    let [year] = await tx.select().from(academicYearsTable).where(eq(academicYearsTable.label, target.label));
+    let [year] = await tx.select().from(academicYearsTable).where(and(eq(academicYearsTable.label, target.label), eq(academicYearsTable.schoolId, schoolId)));
     if (!year) {
-      [year] = await tx.insert(academicYearsTable).values({ label: target.label, startDate: target.startDate, endDate: target.endDate, isCurrent: "false" }).returning();
+      [year] = await tx.insert(academicYearsTable).values({ label: target.label, startDate: target.startDate, endDate: target.endDate, isCurrent: "false", schoolId }).returning();
     }
     if (year.isCurrent === "true" && year.promotedAt) return;
-    const [previous] = await tx.select().from(academicYearsTable).where(and(eq(academicYearsTable.isCurrent, "true"), sql`${academicYearsTable.id} <> ${year.id}`)).orderBy(desc(academicYearsTable.startDate)).limit(1);
+    const [previous] = await tx.select().from(academicYearsTable).where(and(eq(academicYearsTable.isCurrent, "true"), eq(academicYearsTable.schoolId, schoolId), sql`${academicYearsTable.id} <> ${year.id}`)).orderBy(desc(academicYearsTable.startDate)).limit(1);
     if (previous) {
-      const students = await tx.select().from(studentsTable).where(and(eq(studentsTable.academicYearId, previous.id), eq(studentsTable.status, "active")));
+      const students = await tx.select().from(studentsTable).where(and(eq(studentsTable.academicYearId, previous.id), eq(studentsTable.status, "active"), eq(studentsTable.schoolId, schoolId)));
       for (const student of students) {
         const current = parseGrade(student.grade);
         const nextGrade = current && current < MAX_GRADE ? `Grade ${current + 1}` : student.grade;
@@ -49,7 +50,7 @@ async function ensureCurrentAcademicYear(now = new Date()): Promise<void> {
         await tx.update(studentsTable).set({ grade: nextGrade, className: nextClass, academicYearId: year.id }).where(eq(studentsTable.id, student.id));
       }
     }
-    await tx.update(academicYearsTable).set({ isCurrent: "false" }).where(eq(academicYearsTable.isCurrent, "true"));
+    await tx.update(academicYearsTable).set({ isCurrent: "false" }).where(and(eq(academicYearsTable.isCurrent, "true"), eq(academicYearsTable.schoolId, schoolId)));
     await tx.update(academicYearsTable).set({ isCurrent: "true", promotedAt: new Date() }).where(and(eq(academicYearsTable.id, year.id), isNull(academicYearsTable.promotedAt)));
   });
 }
@@ -58,11 +59,14 @@ import {
   CreateBookResponse,
   CreateBorrowBody,
   CreateBorrowResponse,
+  CreateEmployeeBody,
+  CreateEmployeeResponse,
   CreateStudentBody,
   CreateStudentResponse,
   CreateTeacherBody,
   CreateTeacherResponse,
   DeleteBookParams,
+  DeleteEmployeeParams,
   DeleteStudentParams,
   DeleteTeacherParams,
   GetAcademicYearsResponse,
@@ -71,6 +75,8 @@ import {
   GetBorrowsQueryParams,
   GetBorrowsResponse,
   GetDashboardSummaryResponse,
+  GetEmployeesQueryParams,
+  GetEmployeesResponse,
   GetStudentsQueryParams,
   GetStudentsResponse,
   GetTeachersQueryParams,
@@ -84,6 +90,15 @@ import {
   UpdateBookBody,
   UpdateBookParams,
   UpdateBookResponse,
+  UpdateEmployeeBody,
+  UpdateEmployeeParams,
+  UpdateEmployeeResponse,
+  UpdateStudentBody,
+  UpdateStudentParams,
+  UpdateStudentResponse,
+  UpdateTeacherBody,
+  UpdateTeacherParams,
+  UpdateTeacherResponse,
 } from "@workspace/api-zod";
 
 const router: IRouter = Router();
@@ -331,35 +346,47 @@ router.post("/students", async (req, res): Promise<void> => {
   res.status(201).json(CreateStudentResponse.parse(student));
 });
 
-// router.patch("/students/:id", async (req, res): Promise<void> => {
-//   const params = UpdateStudentParams.safeParse(req.params);
-//   const parsed = UpdateStudentBody.safeParse(req.body);
-//   if (!params.success) {
-//     res.status(400).json({ error: params.error.message });
-//     return;
-//   }
-//   if (!parsed.success) {
-//     res.status(400).json({ error: parsed.error.message });
-//     return;
-//   }
-//   const [student] = await db.update(studentsTable).set({
-//     ...parsed.data,
-//     enrollmentDate: parsed.data.enrollmentDate.toISOString().slice(0, 10),
-//   }).where(eq(studentsTable.id, params.data.id)).returning();
-//   if (!student) {
-//     res.status(404).json({ error: "Student not found" });
-//     return;
-//   }
-//   res.json(UpdateStudentResponse.parse(student));
-// });
+router.patch("/students/:id", async (req, res): Promise<void> => {
+  const schoolId = (req as AuthenticatedRequest).schoolId;
+  if (!schoolId) {
+    res.status(401).json({ error: "Not authenticated" });
+    return;
+  }
+
+  const params = UpdateStudentParams.safeParse(req.params);
+  if (!params.success) {
+    res.status(400).json({ error: params.error.message });
+    return;
+  }
+  const parsed = UpdateStudentBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.message });
+    return;
+  }
+  const [student] = await db.update(studentsTable).set({
+    ...parsed.data,
+    enrollmentDate: parsed.data.enrollmentDate.toISOString().slice(0, 10),
+  }).where(and(eq(studentsTable.id, params.data.id), eq(studentsTable.schoolId, schoolId))).returning();
+  if (!student) {
+    res.status(404).json({ error: "Student not found" });
+    return;
+  }
+  res.json(UpdateStudentResponse.parse(student));
+});
 
 router.delete("/students/:id", async (req, res): Promise<void> => {
+  const schoolId = (req as AuthenticatedRequest).schoolId;
+  if (!schoolId) {
+    res.status(401).json({ error: "Not authenticated" });
+    return;
+  }
+
   const params = DeleteStudentParams.safeParse(req.params);
   if (!params.success) {
     res.status(400).json({ error: params.error.message });
     return;
   }
-  const [student] = await db.delete(studentsTable).where(eq(studentsTable.id, params.data.id)).returning();
+  const [student] = await db.delete(studentsTable).where(and(eq(studentsTable.id, params.data.id), eq(studentsTable.schoolId, schoolId))).returning();
   if (!student) {
     res.status(404).json({ error: "Student not found" });
     return;
@@ -416,44 +443,56 @@ router.post("/teachers", async (req, res): Promise<void> => {
   res.status(201).json(CreateTeacherResponse.parse(safe));
 });
 
-// router.patch("/teachers/:id", async (req, res): Promise<void> => {
-//   const params = UpdateTeacherParams.safeParse(req.params);
-//   const parsed = UpdateTeacherBody.safeParse(req.body);
-//   if (!params.success) {
-//     res.status(400).json({ error: params.error.message });
-//     return;
-//   }
-//   if (!parsed.success) {
-//     res.status(400).json({ error: parsed.error.message });
-//     return;
-//   }
-//   const { password, isEmployee, fullName, fullNameArabic, ...rest } = parsed.data;
-//   const [teacher] = await db.update(teachersTable).set({
-//     ...rest,
-//     ...(fullName || rest.name || rest.surname
-//       ? { fullName: fullName || [rest.name, rest.surname].filter(Boolean).join(" ") }
-//       : {}),
-//     ...(fullNameArabic ? { fullNameArabic } : {}),
-//     ...(password !== undefined ? { password } : {}),
-//     ...(isEmployee !== undefined ? { isEmployee } : {}),
-//     status: rest.status ?? "active",
-//   }).where(eq(teachersTable.id, params.data.id)).returning();
-//   if (!teacher) {
-//     res.status(404).json({ error: "Teacher not found" });
-//     return;
-//   }
-//   const { password: _omit, ...safe } = teacher;
-//   void _omit;
-//   res.json(UpdateTeacherResponse.parse(safe));
-// });
+router.patch("/teachers/:id", async (req, res): Promise<void> => {
+  const schoolId = (req as AuthenticatedRequest).schoolId;
+  if (!schoolId) {
+    res.status(401).json({ error: "Not authenticated" });
+    return;
+  }
+
+  const params = UpdateTeacherParams.safeParse(req.params);
+  if (!params.success) {
+    res.status(400).json({ error: params.error.message });
+    return;
+  }
+  const parsed = UpdateTeacherBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.message });
+    return;
+  }
+  const { password, isEmployee, fullName, fullNameArabic, ...rest } = parsed.data;
+  const [teacher] = await db.update(teachersTable).set({
+    ...rest,
+    ...(fullName || rest.name || rest.surname
+      ? { fullName: fullName || [rest.name, rest.surname].filter(Boolean).join(" ") }
+      : {}),
+    ...(fullNameArabic ? { fullNameArabic } : {}),
+    ...(password !== undefined ? { password } : {}),
+    ...(isEmployee !== undefined ? { isEmployee } : {}),
+    status: rest.status ?? "active",
+  }).where(and(eq(teachersTable.id, params.data.id), eq(teachersTable.schoolId, schoolId))).returning();
+  if (!teacher) {
+    res.status(404).json({ error: "Teacher not found" });
+    return;
+  }
+  const { password: _omit, ...safe } = teacher;
+  void _omit;
+  res.json(UpdateTeacherResponse.parse(safe));
+});
 
 router.delete("/teachers/:id", async (req, res): Promise<void> => {
+  const schoolId = (req as AuthenticatedRequest).schoolId;
+  if (!schoolId) {
+    res.status(401).json({ error: "Not authenticated" });
+    return;
+  }
+
   const params = DeleteTeacherParams.safeParse(req.params);
   if (!params.success) {
     res.status(400).json({ error: params.error.message });
     return;
   }
-  const [teacher] = await db.delete(teachersTable).where(eq(teachersTable.id, params.data.id)).returning();
+  const [teacher] = await db.delete(teachersTable).where(and(eq(teachersTable.id, params.data.id), eq(teachersTable.schoolId, schoolId))).returning();
   if (!teacher) {
     res.status(404).json({ error: "Teacher not found" });
     return;
@@ -461,70 +500,98 @@ router.delete("/teachers/:id", async (req, res): Promise<void> => {
   res.sendStatus(204);
 });
 
-// router.get("/employees", async (req, res): Promise<void> => {
-//   const parsed = GetEmployeesQueryParams.safeParse(req.query);
-//   if (!parsed.success) {
-//     res.status(400).json({ error: parsed.error.message });
-//     return;
-//   }
-//   const { search, status } = parsed.data;
-//   const filters = [];
-//   if (search) filters.push(or(ilike(employeesTable.fullName, `%${search}%`), ilike(employeesTable.jobTitle, `%${search}%`), ilike(employeesTable.employeeNumber, `%${search}%`)));
-//   if (status) filters.push(eq(employeesTable.status, status));
-//   const rows = await db.select().from(employeesTable)
-//     .where(filters.length ? and(...filters) : undefined)
-//     .orderBy(employeesTable.employeeNumber);
-//   res.json(GetEmployeesResponse.parse(rows));
-// });
+router.get("/employees", async (req, res): Promise<void> => {
+  const schoolId = (req as AuthenticatedRequest).schoolId;
+  if (!schoolId) {
+    res.status(401).json({ error: "Not authenticated" });
+    return;
+  }
 
-// router.post("/employees", async (req, res): Promise<void> => {
-//   const parsed = CreateEmployeeBody.safeParse(req.body);
-//   if (!parsed.success) {
-//     res.status(400).json({ error: parsed.error.message });
-//     return;
-//   }
-//   const [employee] = await db.insert(employeesTable).values({
-//     ...parsed.data,
-//     status: parsed.data.status ?? "active",
-//   }).returning();
-//   res.status(201).json(CreateEmployeeResponse.parse(employee));
-// });
+  const parsed = GetEmployeesQueryParams.safeParse(req.query);
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.message });
+    return;
+  }
+  const { search, status } = parsed.data;
+  const filters = [eq(employeesTable.schoolId, schoolId)];
+  if (search) {
+    const searchCondition = or(ilike(employeesTable.fullName, `%${search}%`), ilike(employeesTable.jobTitle, `%${search}%`), ilike(employeesTable.employeeNumber, `%${search}%`));
+    if (searchCondition) filters.push(searchCondition);
+  }
+  if (status) filters.push(eq(employeesTable.status, status));
+  const rows = await db.select().from(employeesTable)
+    .where(and(...filters))
+    .orderBy(employeesTable.employeeNumber);
+  res.json(GetEmployeesResponse.parse(rows));
+});
 
-// router.patch("/employees/:id", async (req, res): Promise<void> => {
-//   const params = UpdateEmployeeParams.safeParse(req.params);
-//   const parsed = UpdateEmployeeBody.safeParse(req.body);
-//   if (!params.success) {
-//     res.status(400).json({ error: params.error.message });
-//     return;
-//   }
-//   if (!parsed.success) {
-//     res.status(400).json({ error: parsed.error.message });
-//     return;
-//   }
-//   const [employee] = await db.update(employeesTable).set({
-//     ...parsed.data,
-//     status: parsed.data.status ?? "active",
-//   }).where(eq(employeesTable.id, params.data.id)).returning();
-//   if (!employee) {
-//     res.status(404).json({ error: "Employee not found" });
-//     return;
-//   }
-//   res.json(UpdateEmployeeResponse.parse(employee));
-// });
+router.post("/employees", async (req, res): Promise<void> => {
+  const schoolId = (req as AuthenticatedRequest).schoolId;
+  if (!schoolId) {
+    res.status(401).json({ error: "Not authenticated" });
+    return;
+  }
 
-// router.delete("/employees/:id", async (req, res): Promise<void> => {
-//   const params = DeleteEmployeeParams.safeParse(req.params);
-//   if (!params.success) {
-//     res.status(400).json({ error: params.error.message });
-//     return;
-//   }
-//   const [employee] = await db.delete(employeesTable).where(eq(employeesTable.id, params.data.id)).returning();
-//   if (!employee) {
-//     res.status(404).json({ error: "Employee not found" });
-//     return;
-//   }
-//   res.sendStatus(204);
-// });
+  const parsed = CreateEmployeeBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.message });
+    return;
+  }
+  const [employee] = await db.insert(employeesTable).values({
+    ...parsed.data,
+    schoolId,
+    status: parsed.data.status ?? "active",
+  }).returning();
+  res.status(201).json(CreateEmployeeResponse.parse(employee));
+});
+
+router.patch("/employees/:id", async (req, res): Promise<void> => {
+  const schoolId = (req as AuthenticatedRequest).schoolId;
+  if (!schoolId) {
+    res.status(401).json({ error: "Not authenticated" });
+    return;
+  }
+
+  const params = UpdateEmployeeParams.safeParse(req.params);
+  if (!params.success) {
+    res.status(400).json({ error: params.error.message });
+    return;
+  }
+  const parsed = UpdateEmployeeBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.message });
+    return;
+  }
+  const [employee] = await db.update(employeesTable).set({
+    ...parsed.data,
+    status: parsed.data.status ?? "active",
+  }).where(and(eq(employeesTable.id, params.data.id), eq(employeesTable.schoolId, schoolId))).returning();
+  if (!employee) {
+    res.status(404).json({ error: "Employee not found" });
+    return;
+  }
+  res.json(UpdateEmployeeResponse.parse(employee));
+});
+
+router.delete("/employees/:id", async (req, res): Promise<void> => {
+  const schoolId = (req as AuthenticatedRequest).schoolId;
+  if (!schoolId) {
+    res.status(401).json({ error: "Not authenticated" });
+    return;
+  }
+
+  const params = DeleteEmployeeParams.safeParse(req.params);
+  if (!params.success) {
+    res.status(400).json({ error: params.error.message });
+    return;
+  }
+  const [employee] = await db.delete(employeesTable).where(and(eq(employeesTable.id, params.data.id), eq(employeesTable.schoolId, schoolId))).returning();
+  if (!employee) {
+    res.status(404).json({ error: "Employee not found" });
+    return;
+  }
+  res.sendStatus(204);
+});
 
 router.get("/library/books", async (req, res): Promise<void> => {
   const schoolId = (req as AuthenticatedRequest).schoolId;
@@ -599,6 +666,12 @@ router.post("/library/books", async (req, res): Promise<void> => {
 });
 
 router.patch("/library/books/:id", async (req, res): Promise<void> => {
+  const schoolId = (req as AuthenticatedRequest).schoolId;
+  if (!schoolId) {
+    res.status(401).json({ error: "Not authenticated" });
+    return;
+  }
+
   const params = UpdateBookParams.safeParse(req.params);
   if (!params.success) {
     res.status(400).json({ error: params.error.message });
@@ -609,7 +682,7 @@ router.patch("/library/books/:id", async (req, res): Promise<void> => {
     res.status(400).json({ error: parsed.error.message });
     return;
   }
-  const [existing] = await db.select().from(booksTable).where(eq(booksTable.id, params.data.id));
+  const [existing] = await db.select().from(booksTable).where(and(eq(booksTable.id, params.data.id), eq(booksTable.schoolId, schoolId)));
   if (!existing) {
     res.status(404).json({ error: "Book not found" });
     return;
@@ -628,17 +701,23 @@ router.patch("/library/books/:id", async (req, res): Promise<void> => {
       : {}),
     copies,
     availableCopies,
-  }).where(eq(booksTable.id, params.data.id)).returning();
+  }).where(and(eq(booksTable.id, params.data.id), eq(booksTable.schoolId, schoolId))).returning();
   res.json(UpdateBookResponse.parse(book));
 });
 
 router.delete("/library/books/:id", async (req, res): Promise<void> => {
+  const schoolId = (req as AuthenticatedRequest).schoolId;
+  if (!schoolId) {
+    res.status(401).json({ error: "Not authenticated" });
+    return;
+  }
+
   const params = DeleteBookParams.safeParse(req.params);
   if (!params.success) {
     res.status(400).json({ error: params.error.message });
     return;
   }
-  const [book] = await db.delete(booksTable).where(eq(booksTable.id, params.data.id)).returning();
+  const [book] = await db.delete(booksTable).where(and(eq(booksTable.id, params.data.id), eq(booksTable.schoolId, schoolId))).returning();
   if (!book) {
     res.status(404).json({ error: "Book not found" });
     return;
@@ -647,6 +726,12 @@ router.delete("/library/books/:id", async (req, res): Promise<void> => {
 });
 
 router.patch("/library/books/:id/condition", async (req, res): Promise<void> => {
+  const schoolId = (req as AuthenticatedRequest).schoolId;
+  if (!schoolId) {
+    res.status(401).json({ error: "Not authenticated" });
+    return;
+  }
+
   const params = MarkBookConditionParams.safeParse(req.params);
   if (!params.success) {
     res.status(400).json({ error: params.error.message });
@@ -659,7 +744,7 @@ router.patch("/library/books/:id/condition", async (req, res): Promise<void> => 
   }
   const { action, copyId } = parsed.data;
   await db.transaction(async (tx) => {
-    const [existing] = await tx.select().from(booksTable).where(eq(booksTable.id, params.data.id));
+    const [existing] = await tx.select().from(booksTable).where(and(eq(booksTable.id, params.data.id), eq(booksTable.schoolId, schoolId)));
     if (!existing) {
       res.status(404).json({ error: "Book not found" });
       return;
@@ -671,10 +756,12 @@ router.patch("/library/books/:id/condition", async (req, res): Promise<void> => 
       const expectedStatus = action === "lost" ? "available" : action === "damaged" ? "available" : action === "found" ? "lost" : "damaged";
       const nextStatus = action === "lost" ? "lost" : action === "damaged" ? "damaged" : "available";
       let [copy] = await tx.select().from(bookCopiesTable)
-        .where(and(eq(bookCopiesTable.bookId, existing.id), eq(bookCopiesTable.barcode, copyId), eq(bookCopiesTable.status, expectedStatus)));
+        .where(and(eq(bookCopiesTable.bookId, existing.id), eq(bookCopiesTable.barcode, copyId), eq(bookCopiesTable.status, expectedStatus)))
+        .limit(1);
       if (!copy && (action === "found" || action === "fixed")) {
         [copy] = await tx.select().from(bookCopiesTable)
-          .where(and(eq(bookCopiesTable.bookId, existing.id), eq(bookCopiesTable.barcode, copyId)));
+          .where(and(eq(bookCopiesTable.bookId, existing.id), eq(bookCopiesTable.barcode, copyId)))
+          .limit(1);
       }
       if (!copy) {
         res.status(409).json({ error: "The selected copy barcode is not available for this action" });
@@ -697,15 +784,21 @@ router.patch("/library/books/:id/condition", async (req, res): Promise<void> => 
       else next = { lostCopies: lost, damagedCopies: damaged - 1, availableCopies: available + 1 };
     }
     if (next) {
-      const [book] = await tx.update(booksTable).set(next).where(eq(booksTable.id, params.data.id)).returning();
+      const [book] = await tx.update(booksTable).set(next).where(and(eq(booksTable.id, params.data.id), eq(booksTable.schoolId, schoolId))).returning();
       res.json(MarkBookConditionResponse.parse({ ...book, copyIds: copyId ? [copyId] : undefined }));
     }
   });
 });
 
 router.get("/library/borrows", async (req, res): Promise<void> => {
+  const schoolId = (req as AuthenticatedRequest).schoolId;
+  if (!schoolId) {
+    res.status(401).json({ error: "Not authenticated" });
+    return;
+  }
+
   const parsed = GetBorrowsQueryParams.safeParse(req.query);
-  const filters = [];
+  const filters = [eq(borrowsTable.schoolId, schoolId)];
   if (parsed.success && parsed.data.active) filters.push(isNull(borrowsTable.returnedAt));
   const rows = await db.select({
     id: borrowsTable.id,
@@ -727,7 +820,7 @@ router.get("/library/borrows", async (req, res): Promise<void> => {
     .leftJoin(studentsTable, eq(borrowsTable.studentId, studentsTable.id))
     .leftJoin(teachersTable, and(eq(borrowsTable.borrowerType, "teacher"), eq(borrowsTable.borrowerId, teachersTable.id)))
     .leftJoin(employeesTable, and(eq(borrowsTable.borrowerType, "employee"), eq(borrowsTable.borrowerId, employeesTable.id)))
-    .where(filters.length ? and(...filters) : undefined)
+    .where(and(...filters))
     .orderBy(desc(borrowsTable.borrowedAt));
   res.json(GetBorrowsResponse.parse(rows.map((row) => ({
     ...row,
@@ -737,12 +830,18 @@ router.get("/library/borrows", async (req, res): Promise<void> => {
 });
 
 router.post("/library/borrows", async (req, res): Promise<void> => {
+  const schoolId = (req as AuthenticatedRequest).schoolId;
+  if (!schoolId) {
+    res.status(401).json({ error: "Not authenticated" });
+    return;
+  }
+
   const parsed = CreateBorrowBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.message });
     return;
   }
-  const [book] = await db.select().from(booksTable).where(eq(booksTable.id, parsed.data.bookId));
+  const [book] = await db.select().from(booksTable).where(and(eq(booksTable.id, parsed.data.bookId), eq(booksTable.schoolId, schoolId)));
   if (!book) {
     res.status(404).json({ error: "Book not found" });
     return;
@@ -751,10 +850,18 @@ router.post("/library/borrows", async (req, res): Promise<void> => {
     res.status(409).json({ error: "No copies of this book are currently available" });
     return;
   }
+  if (parsed.data.borrowerType === "student") {
+    const [student] = await db.select().from(studentsTable).where(and(eq(studentsTable.id, parsed.data.borrowerId), eq(studentsTable.schoolId, schoolId)));
+    if (!student) {
+      res.status(404).json({ error: "Student not found" });
+      return;
+    }
+  }
   const [existingBorrow] = await db.select({ id: borrowsTable.id }).from(borrowsTable).where(and(
     eq(borrowsTable.bookId, parsed.data.bookId),
     eq(borrowsTable.borrowerType, parsed.data.borrowerType),
     eq(borrowsTable.borrowerId, parsed.data.borrowerId),
+    eq(borrowsTable.schoolId, schoolId),
     isNull(borrowsTable.returnedAt),
   ));
   if (existingBorrow) {
@@ -766,6 +873,7 @@ router.post("/library/borrows", async (req, res): Promise<void> => {
     studentId: parsed.data.borrowerType === "student" ? parsed.data.borrowerId : null,
     borrowerType: parsed.data.borrowerType,
     borrowerId: parsed.data.borrowerId,
+    schoolId,
     dueDate: parsed.data.dueDate ? parsed.data.dueDate.toISOString().slice(0, 10) : null,
   }).returning();
   await db.update(booksTable).set({ availableCopies: book.availableCopies - 1 }).where(eq(booksTable.id, book.id));
@@ -773,6 +881,12 @@ router.post("/library/borrows", async (req, res): Promise<void> => {
 });
 
 router.patch("/library/borrows/:id/return", async (req, res): Promise<void> => {
+  const schoolId = (req as AuthenticatedRequest).schoolId;
+  if (!schoolId) {
+    res.status(401).json({ error: "Not authenticated" });
+    return;
+  }
+
   const params = ReturnBorrowParams.safeParse(req.params);
   if (!params.success) {
     res.status(400).json({ error: params.error.message });
@@ -785,7 +899,7 @@ router.patch("/library/borrows/:id/return", async (req, res): Promise<void> => {
   }
   const condition = parsed.data.condition ?? "good";
   await db.transaction(async (tx) => {
-    const [existing] = await tx.select().from(borrowsTable).where(eq(borrowsTable.id, params.data.id));
+    const [existing] = await tx.select().from(borrowsTable).where(and(eq(borrowsTable.id, params.data.id), eq(borrowsTable.schoolId, schoolId)));
     if (!existing) {
       res.status(404).json({ error: "Borrow not found" });
       return;
@@ -795,19 +909,19 @@ router.patch("/library/borrows/:id/return", async (req, res): Promise<void> => {
       return;
     }
     const returnedAt = new Date();
-    const [borrow] = await tx.update(borrowsTable).set({ returnedAt, condition }).where(eq(borrowsTable.id, params.data.id)).returning();
+    const [borrow] = await tx.update(borrowsTable).set({ returnedAt, condition }).where(and(eq(borrowsTable.id, params.data.id), eq(borrowsTable.schoolId, schoolId))).returning();
     if (condition === "good") {
       await tx.update(booksTable).set({
         availableCopies: sql`LEAST(${booksTable.copies}, ${booksTable.availableCopies} + 1)`,
-      }).where(eq(booksTable.id, existing.bookId));
+      }).where(and(eq(booksTable.id, existing.bookId), eq(booksTable.schoolId, schoolId)));
     } else if (condition === "damaged") {
       await tx.update(booksTable).set({
         damagedCopies: sql`${booksTable.damagedCopies} + 1`,
-      }).where(eq(booksTable.id, existing.bookId));
+      }).where(and(eq(booksTable.id, existing.bookId), eq(booksTable.schoolId, schoolId)));
     } else {
       await tx.update(booksTable).set({
         lostCopies: sql`${booksTable.lostCopies} + 1`,
-      }).where(eq(booksTable.id, existing.bookId));
+      }).where(and(eq(booksTable.id, existing.bookId), eq(booksTable.schoolId, schoolId)));
     }
     res.json(ReturnBorrowResponse.parse({
       ...borrow,
@@ -827,6 +941,12 @@ const attendanceInput = z.object({
 });
 
 router.get("/attendance", async (req, res): Promise<void> => {
+  const schoolId = (req as AuthenticatedRequest).schoolId;
+  if (!schoolId) {
+    res.status(401).json({ error: "Not authenticated" });
+    return;
+  }
+
   const query = z.object({
     academicYearId: z.coerce.number().int().positive(),
     studentId: z.coerce.number().int().positive().optional(),
@@ -834,7 +954,7 @@ router.get("/attendance", async (req, res): Promise<void> => {
     to: z.string().regex(/^\\d{4}-\\d{2}-\\d{2}$/).optional(),
   }).safeParse(req.query);
   if (!query.success) { res.status(400).json({ error: "Invalid attendance filters" }); return; }
-  const filters = [eq(attendanceTable.academicYearId, query.data.academicYearId)];
+  const filters = [eq(attendanceTable.schoolId, schoolId), eq(attendanceTable.academicYearId, query.data.academicYearId)];
   if (query.data.studentId) filters.push(eq(attendanceTable.studentId, query.data.studentId));
   if (query.data.from) filters.push(gte(attendanceTable.attendanceDate, query.data.from));
   if (query.data.to) filters.push(lte(attendanceTable.attendanceDate, query.data.to));
@@ -842,21 +962,90 @@ router.get("/attendance", async (req, res): Promise<void> => {
 });
 
 router.post("/attendance", async (req, res): Promise<void> => {
+  const schoolId = (req as AuthenticatedRequest).schoolId;
+  if (!schoolId) {
+    res.status(401).json({ error: "Not authenticated" });
+    return;
+  }
+
   const parsed = attendanceInput.safeParse(req.body);
   if (!parsed.success) { res.status(400).json({ error: "Invalid attendance record" }); return; }
-  const [student] = await db.select({ id: studentsTable.id }).from(studentsTable).where(eq(studentsTable.id, parsed.data.studentId));
+  const [student] = await db.select({ id: studentsTable.id }).from(studentsTable).where(and(eq(studentsTable.id, parsed.data.studentId), eq(studentsTable.schoolId, schoolId)));
   if (!student) { res.status(404).json({ error: "Student not found" }); return; }
-  const [record] = await db.insert(attendanceTable).values(parsed.data).returning();
+  const [record] = await db.insert(attendanceTable).values({ ...parsed.data, schoolId }).returning();
   res.status(201).json(record);
 });
 
-router.get("/academic-years", async (_req, res): Promise<void> => {
-  await ensureCurrentAcademicYear();
-  const rows = await db.select().from(academicYearsTable).orderBy(desc(academicYearsTable.startDate));
+router.get("/academic-years", async (req, res): Promise<void> => {
+  const schoolId = (req as AuthenticatedRequest).schoolId;
+  if (!schoolId) {
+    res.status(401).json({ error: "Not authenticated" });
+    return;
+  }
+
+  await ensureCurrentAcademicYear(new Date(), schoolId);
+  const rows = await db.select().from(academicYearsTable).where(eq(academicYearsTable.schoolId, schoolId)).orderBy(desc(academicYearsTable.startDate));
   res.json(GetAcademicYearsResponse.parse(rows.map((row) => ({
     ...row,
     isCurrent: row.isCurrent === "true",
   }))));
+});
+
+router.put("/admin/student-access", async (req, res): Promise<void> => {
+  const schoolId = (req as AuthenticatedRequest).schoolId;
+  if (!schoolId) {
+    res.status(401).json({ error: "Not authenticated" });
+    return;
+  }
+
+  const schema = z.object({
+    password: z.string().min(8),
+  });
+
+  const parsed = schema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "Password must be at least 8 characters" });
+    return;
+  }
+
+  const { password } = parsed.data;
+
+  try {
+    // Hash the password
+    const passwordHash = await argon2.hash(password);
+
+    // Check if shared access already exists
+    const existing = await db
+      .select()
+      .from(studentAccessTable)
+      .where(and(
+        eq(studentAccessTable.schoolId, schoolId),
+        eq(studentAccessTable.mode, "shared")
+      ))
+      .limit(1);
+
+    if (existing.length > 0) {
+      // Update existing
+      await db
+        .update(studentAccessTable)
+        .set({ passwordHash, updatedAt: new Date() })
+        .where(eq(studentAccessTable.id, existing[0].id));
+    } else {
+      // Create new
+      await db.insert(studentAccessTable).values({
+        schoolId,
+        mode: "shared",
+        passwordHash,
+        isActive: true,
+      });
+    }
+
+    logger.info({ schoolId }, "Student access password updated");
+    res.json({ success: true });
+  } catch (error) {
+    logger.error({ err: error, schoolId }, "Student access update error");
+    res.status(500).json({ error: "Failed to update student access" });
+  }
 });
 
 export default router;

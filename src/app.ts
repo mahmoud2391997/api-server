@@ -2,8 +2,9 @@ import express from "express";
 import cors from "cors";
 import pinoHttpModule from "pino-http";
 import router from "./routes/index.js";
+import studentRouter from "./routes/student.js";
 import { logger } from "./lib/logger.js";
-import { apiKeyAuth } from "./middlewares/auth.js";
+import { apiKeyAuth, studentAuth } from "./middlewares/auth.js";
 
 const pinoHttp = pinoHttpModule as unknown as (options: Record<string, unknown>) => express.RequestHandler;
 const app = express();
@@ -45,7 +46,7 @@ const corsOptions = {
     callback(new Error("Origin is not allowed"));
   },
   credentials: true,
-  methods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+  methods: ["GET", "POST", "PATCH", "DELETE", "PUT", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization", "X-API-Key"],
 };
 
@@ -54,16 +55,20 @@ app.options(/.*/, cors(corsOptions));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Apply API key authentication to every API route except the public health check and registration.
-app.use("/api", (req, res, next) => {
-  if (req.path === "/healthz") {
-    return next();
-  }
-  if (req.path === "/register-school") {
-    return next();
-  }
-  return apiKeyAuth(req, res, next);
-});
+// Public routes (no auth required)
+app.use("/api/healthz", (req, res, next) => next());
+app.use("/api/register-school", (req, res, next) => next());
+
+// Student routes
+app.use("/api/student/login", (req, res, next) => next());
+app.use("/api/student", studentAuth);
+app.use("/api/student", studentRouter);
+
+// Admin routes: require API key
+app.use("/api/admin", apiKeyAuth);
+
+// All other API routes: require API key
+app.use("/api", apiKeyAuth);
 
 app.use("/api", router);
 
