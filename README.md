@@ -57,7 +57,62 @@ After deployment, verify `GET https://<deployment>/api/healthz` returns `{"statu
 ## API endpoints
 
 - `GET /api/healthz` — health check
+- `POST /api/register-school` — register a new school (first-time setup)
+- `GET /api/school-info` — get current school information (requires API key)
 - `/api/*` — school, library, and chat routes defined in `src/routes/`
+
+## Multi-School Support
+
+The API supports multiple schools with data isolation. Each school has:
+
+- **Unique API Key**: Generated during school registration
+- **Isolated Data**: Students, teachers, books, and other data are scoped by school
+- **Independent Operations**: Each school operates independently with its own data
+
+### First-Time Setup
+
+When setting up a new school:
+
+1. **Register the School**:
+```bash
+curl -X POST http://localhost:3000/api/register-school \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "My School",
+    "nameArabic": "مدرستي",
+    "code": "SCHOOL001",
+    "address": "123 School St",
+    "phone": "555-1234",
+    "email": "admin@school.com",
+    "principalName": "Principal Name"
+  }'
+```
+
+2. **Save the API Key**: The response includes a unique API key (format: `sk-...`). Store this securely in your desktop application configuration.
+
+3. **Use the API Key**: Include it in all subsequent requests:
+```bash
+curl -H "X-API-Key: sk-your-api-key-here" \
+  http://localhost:3000/api/students
+```
+
+### API Key Authentication
+
+All API endpoints (except `/api/healthz` and `/api/register-school`) require authentication via the `X-API-Key` header:
+
+- **Header**: `X-API-Key: sk-your-api-key-here`
+- **Security**: Each school has a unique key; never share it
+- **Desktop Integration**: Embed the API key in your desktop application configuration
+- **Hacking Prevention**: Invalid keys are rejected; inactive schools are blocked
+
+### Student/Admin Panel Sync
+
+Both the student panel and admin panel connect to the same API:
+
+1. **Admin Panel**: Uses the school's API key for full access to manage students, teachers, books, etc.
+2. **Student Panel**: Uses the same API key but may have restricted access based on user permissions
+3. **Data Consistency**: Both panels access the same real-time data from the database
+4. **Secure Communication**: All requests are authenticated via API key
 
 ## Environment example
 

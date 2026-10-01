@@ -25,3 +25,36 @@ pnpm run vercel-build
 ```
 
 After deployment, call `GET /api/healthz` and expect `{"status":"ok"}`. A successful local build does not configure Vercel project settings or prove connectivity to production databases.
+
+## Multi-School Support Features
+
+### Database Schema
+- [x] Schools table added with unique API keys
+- [x] All data tables (students, teachers, books, etc.) linked to schools via school_id
+- [x] Database migration created (0004_multi_school_support.sql)
+- [x] Unique constraints per school (student numbers, employee codes, etc.)
+
+### API Key Authentication
+- [x] Authentication middleware implemented
+- [x] API key validation on all protected endpoints
+- [x] School activation status checking
+- [x] X-API-Key header support in CORS
+
+### School Registration
+- [x] POST /api/register-school endpoint for first-time setup
+- [x] Secure API key generation (format: sk-...)
+- [x] School information endpoint (GET /api/school-info)
+- [x] Default school migration for existing data
+
+### Desktop Integration
+- [x] API key embedded in desktop app configuration
+- [x] Secure communication between desktop and API
+- [x] Student/Admin panel synchronization via same API
+- [x] Data isolation per school
+
+### First-Time Setup Process
+1. Register school via POST /api/register-school
+2. Receive and securely store the API key
+3. Configure desktop app with the API key
+4. All subsequent requests use X-API-Key header
+5. Student and admin panels sync through the same API
