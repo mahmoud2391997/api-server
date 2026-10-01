@@ -19,25 +19,26 @@ export type LibrarySyncPayload = {
   syncedAt?: string;
 };
 
-export async function syncLibraryToMongo(payload: LibrarySyncPayload): Promise<boolean> {
+export async function syncLibraryToMongo(payload: LibrarySyncPayload & { schoolId: number }): Promise<boolean> {
   const database = await getDb();
   if (!database) return false;
   const syncedAt = payload.syncedAt || new Date().toISOString();
   const books = database.collection("library_books");
   const borrows = database.collection("library_borrows");
-  await books.deleteMany({});
-  await borrows.deleteMany({});
-  if (payload.books.length) await books.insertMany(payload.books.map((book) => ({ ...book, syncedAt })));
-  if (payload.borrows.length) await borrows.insertMany(payload.borrows.map((borrow) => ({ ...borrow, syncedAt })));
+  const schoolFilter = { schoolId: payload.schoolId };
+  await books.deleteMany(schoolFilter);
+  await borrows.deleteMany(schoolFilter);
+  if (payload.books.length) await books.insertMany(payload.books.map((book) => ({ ...book, schoolId: payload.schoolId, syncedAt })));
+  if (payload.borrows.length) await borrows.insertMany(payload.borrows.map((borrow) => ({ ...borrow, schoolId: payload.schoolId, syncedAt })));
   return true;
 }
 
-export async function getStudentLibraryFromMongo() {
+export async function getStudentLibraryFromMongo(schoolId: number) {
   const database = await getDb();
   if (!database) return null;
   const [books, borrows] = await Promise.all([
-    database.collection("library_books").find({}).sort({ title: 1 }).toArray(),
-    database.collection("library_borrows").find({}).sort({ borrowedAt: -1 }).toArray(),
+    database.collection("library_books").find({ schoolId }).sort({ title: 1 }).toArray(),
+    database.collection("library_borrows").find({ schoolId }).sort({ borrowedAt: -1 }).toArray(),
   ]);
   return { books, borrows };
 }

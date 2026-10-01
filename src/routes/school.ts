@@ -4,6 +4,7 @@ import { db } from "@workspace/db";
 import { academicYearsTable, attendanceTable, booksTable, bookCopiesTable, borrowsTable, employeesTable, studentsTable, teachersTable } from "@workspace/db/schema";
 import { z } from "zod";
 import { getStudentLibraryFromMongo, syncLibraryToMongo } from "../lib/mongodb.js";
+import type { AuthenticatedRequest } from "../middlewares/auth.js";
 
 const MAX_GRADE = 12;
 const ARABIC_GRADES = ["الأول ابتدائي", "الثاني ابتدائي", "الثالث ابتدائي", "الرابع ابتدائي", "الخامس ابتدائي", "السادس ابتدائي", "الأول متوسط", "الثاني متوسط", "الثالث متوسط", "الأول ثانوي", "الثاني ثانوي", "الثالث ثانوي"];
@@ -87,7 +88,7 @@ import {
 const router: IRouter = Router();
 
 router.get("/library/student-data", async (_req, res): Promise<void> => {
-  const data = await getStudentLibraryFromMongo();
+  const data = await getStudentLibraryFromMongo((_req as AuthenticatedRequest).schoolId || 1);
   if (!data) {
     res.status(503).json({ error: "MongoDB is not configured" });
     return;
@@ -101,7 +102,7 @@ router.post("/library/sync", async (req, res): Promise<void> => {
     res.status(400).json({ error: "books and borrows arrays are required" });
     return;
   }
-  const synced = await syncLibraryToMongo({ books: payload.books, borrows: payload.borrows });
+  const synced = await syncLibraryToMongo({ schoolId: (req as AuthenticatedRequest).schoolId || 1, books: payload.books, borrows: payload.borrows });
   if (!synced) {
     res.status(503).json({ error: "MongoDB is not configured" });
     return;

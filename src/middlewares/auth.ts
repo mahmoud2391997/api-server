@@ -1,4 +1,5 @@
 import { Request, Response, NextFunction } from "express";
+import crypto from "node:crypto";
 import { db } from "@workspace/db";
 import { schoolsTable } from "@workspace/db/schema";
 import { eq } from "drizzle-orm";
@@ -27,14 +28,15 @@ export async function apiKeyAuth(req: AuthenticatedRequest, res: Response, next:
   }
 
   try {
+    const keyHash = crypto.createHash("sha256").update(apiKey).digest("hex");
     const schools = await db
       .select()
       .from(schoolsTable)
-      .where(eq(schoolsTable.apiKey, apiKey))
+      .where(eq(schoolsTable.apiKeyHash, keyHash))
       .limit(1);
 
     if (schools.length === 0) {
-      logger.warn({ apiKey: apiKey.substring(0, 8) + "..." }, "Invalid API key");
+      logger.warn({ apiKeyPrefix: apiKey.substring(0, 8) + "..." }, "Invalid API key");
       return res.status(403).json({ error: "Invalid API key" });
     }
 

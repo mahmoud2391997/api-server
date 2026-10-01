@@ -13,7 +13,9 @@ export const schoolsTable = pgTable("schools", {
   email: text("email").notNull().default(""),
   principalName: text("principal_name").notNull().default(""),
   establishedDate: date("established_date", { mode: "string" }),
-  apiKey: text("api_key").notNull().unique(),
+  apiKey: text("api_key"),
+  apiKeyHash: text("api_key_hash").notNull().default(""),
+  apiKeyPrefix: text("api_key_prefix").notNull().default(""),
   isActive: boolean("is_active").notNull().default(true),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
@@ -21,7 +23,7 @@ export const schoolsTable = pgTable("schools", {
 
 export const academicYearsTable = pgTable("academic_years", {
   id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
-  schoolId: integer("school_id").notNull().references(() => schoolsTable.id, { onDelete: "cascade" }),
+  schoolId: integer("school_id").notNull().default(1).references(() => schoolsTable.id, { onDelete: "cascade" }),
   label: text("label").notNull(),
   startDate: date("start_date", { mode: "string" }).notNull(),
   endDate: date("end_date", { mode: "string" }).notNull(),
@@ -31,7 +33,7 @@ export const academicYearsTable = pgTable("academic_years", {
 
 export const studentsTable = pgTable("students", {
   id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
-  schoolId: integer("school_id").notNull().references(() => schoolsTable.id, { onDelete: "cascade" }),
+  schoolId: integer("school_id").notNull().default(1).references(() => schoolsTable.id, { onDelete: "cascade" }),
   academicYearId: integer("academic_year_id").notNull().default(0),
   fullName: text("full_name").notNull(),
   fullNameArabic: text("full_name_arabic").notNull(),
@@ -49,7 +51,7 @@ export const studentsTable = pgTable("students", {
 
 export const teachersTable = pgTable("teachers", {
   id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
-  schoolId: integer("school_id").notNull().references(() => schoolsTable.id, { onDelete: "cascade" }),
+  schoolId: integer("school_id").notNull().default(1).references(() => schoolsTable.id, { onDelete: "cascade" }),
   academicYearId: integer("academic_year_id").notNull().default(0),
   fullName: text("full_name").notNull(),
   fullNameArabic: text("full_name_arabic").notNull().default(""),
@@ -81,7 +83,7 @@ export const teachersTable = pgTable("teachers", {
 
 export const employeesTable = pgTable("employees", {
   id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
-  schoolId: integer("school_id").notNull().references(() => schoolsTable.id, { onDelete: "cascade" }),
+  schoolId: integer("school_id").notNull().default(1).references(() => schoolsTable.id, { onDelete: "cascade" }),
   fullName: text("full_name").notNull(),
   fullNameArabic: text("full_name_arabic").notNull(),
   employeeNumber: text("employee_number").notNull(),
@@ -93,7 +95,7 @@ export const employeesTable = pgTable("employees", {
 
 export const booksTable = pgTable("books", {
   id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
-  schoolId: integer("school_id").notNull().references(() => schoolsTable.id, { onDelete: "cascade" }),
+  schoolId: integer("school_id").notNull().default(1).references(() => schoolsTable.id, { onDelete: "cascade" }),
   title: text("title").notNull(),
   subtitle: text("subtitle").notNull().default(""),
   author: text("author").notNull().default(""),
@@ -131,7 +133,7 @@ export const bookCopiesTable = pgTable("book_copies", {
 
 export const attendanceTable = pgTable("attendance", {
   id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
-  schoolId: integer("school_id").notNull().references(() => schoolsTable.id, { onDelete: "cascade" }),
+  schoolId: integer("school_id").notNull().default(1).references(() => schoolsTable.id, { onDelete: "cascade" }),
   studentId: integer("student_id").notNull().references(() => studentsTable.id, { onDelete: "cascade" }),
   academicYearId: integer("academic_year_id").notNull(),
   attendanceDate: date("attendance_date", { mode: "string" }).notNull(),
@@ -142,7 +144,7 @@ export const attendanceTable = pgTable("attendance", {
 
 export const borrowsTable = pgTable("borrows", {
   id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
-  schoolId: integer("school_id").notNull().references(() => schoolsTable.id, { onDelete: "cascade" }),
+  schoolId: integer("school_id").notNull().default(1).references(() => schoolsTable.id, { onDelete: "cascade" }),
   bookId: integer("book_id").notNull().references(() => booksTable.id, { onDelete: "cascade" }),
   studentId: integer("student_id").references(() => studentsTable.id, { onDelete: "cascade" }),
   borrowerType: text("borrower_type").notNull().default("student"),
