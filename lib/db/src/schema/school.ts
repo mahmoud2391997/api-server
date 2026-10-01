@@ -47,6 +47,7 @@ export const studentsTable = pgTable("students", {
   status: text("status").notNull().default("active"),
   enrollmentDate: date("enrollment_date", { mode: "string" }).notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  localId: integer("local_id"),
 }, (table) => ({ schoolStudentNumberUnique: uniqueIndex("students_school_student_number_idx").on(table.schoolId, table.studentNumber) }));
 
 export const teachersTable = pgTable("teachers", {
@@ -120,6 +121,7 @@ export const booksTable = pgTable("books", {
   shelf: text("shelf").notNull().default(""),
   lostCopies: integer("lost_copies").notNull().default(0),
   damagedCopies: integer("damaged_copies").notNull().default(0),
+  localId: integer("local_id"),
 });
 
 export const bookCopiesTable = pgTable("book_copies", {
@@ -140,6 +142,7 @@ export const attendanceTable = pgTable("attendance", {
   status: text("status").notNull(),
   note: text("note").notNull().default(""),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  localId: integer("local_id"),
 });
 
 export const borrowsTable = pgTable("borrows", {
@@ -153,7 +156,19 @@ export const borrowsTable = pgTable("borrows", {
   dueDate: date("due_date", { mode: "string" }),
   returnedAt: timestamp("returned_at", { withTimezone: true }),
   condition: text("condition").notNull().default("good"),
+  localId: integer("local_id"),
 });
+
+export const studentAccountsTable = pgTable("student_accounts", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  schoolId: integer("school_id").notNull().references(() => schoolsTable.id, { onDelete: "cascade" }),
+  studentId: integer("student_id").notNull().references(() => studentsTable.id, { onDelete: "cascade" }),
+  username: text("username").notNull(),
+  passwordHash: text("password_hash").notNull(),
+  mustChangePassword: boolean("must_change_password").notNull().default(true),
+  lastLoginAt: timestamp("last_login_at", { withTimezone: true }),
+  isActive: boolean("is_active").notNull().default(true),
+}, (table) => ({ usernameUnique: uniqueIndex("student_accounts_school_username_idx").on(table.schoolId, table.username) }));
 
 export const insertSchoolSchema = createInsertSchema(schoolsTable);
 export const insertAcademicYearSchema = createInsertSchema(academicYearsTable);

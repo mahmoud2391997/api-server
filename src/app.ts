@@ -4,6 +4,7 @@ import pinoHttpModule from "pino-http";
 import router from "./routes/index.js";
 import { logger } from "./lib/logger.js";
 import { apiKeyAuth, optionalApiKeyAuth } from "./middlewares/auth.js";
+import { studentAuth } from "./middlewares/student-auth.js";
 
 const pinoHttp = pinoHttpModule as unknown as (options: Record<string, unknown>) => express.RequestHandler;
 const app = express();
@@ -29,7 +30,7 @@ app.use(
 );
 const allowedOrigins = new Set(
   [
-    process.env.FRONTEND_URL,
+    ...(process.env.FRONTEND_URL ?? "").split(",").map((origin) => origin.trim()).filter(Boolean),
     process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : undefined,
   ].filter((origin): origin is string => Boolean(origin)),
 );
@@ -46,16 +47,15 @@ app.use(cors({
   },
   credentials: true,
   methods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization", "X-API-Key"],
+  allowedHeaders: ["Content-Type", "Authorization", "X-API-Key", "X-Registration-Secret"],
 }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // Apply API key authentication to all API routes except health check
 app.use("/api", (req, res, next) => {
-  if (req.path === "/healthz" || req.path === "/register-school") {
-    return optionalApiKeyAuth(req, res, next);
-  }
+  if (req.path === "/healthz" || req.path === "/register-school" || req.path === "/student/login") return optionalApiKeyAuth(req, res, next);
+  if (req.path.startsWith("/student/")) return studentAuth(req as never, res, next);
   return apiKeyAuth(req, res, next);
 });
 
