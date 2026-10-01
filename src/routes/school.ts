@@ -102,7 +102,13 @@ router.post("/library/sync", async (req, res): Promise<void> => {
     res.status(400).json({ error: "books and borrows arrays are required" });
     return;
   }
-  const synced = await syncLibraryToMongo({ schoolId: (req as AuthenticatedRequest).schoolId || 1, books: payload.books, borrows: payload.borrows });
+  const schoolId = (req as AuthenticatedRequest).schoolId;
+  if (!schoolId) {
+    res.status(401).json({ error: "Not authenticated" });
+    return;
+  }
+
+  const synced = await syncLibraryToMongo({ schoolId, books: payload.books, borrows: payload.borrows });
   if (!synced) {
     res.status(503).json({ error: "MongoDB is not configured" });
     return;

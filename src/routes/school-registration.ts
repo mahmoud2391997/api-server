@@ -1,4 +1,4 @@
-import { Router, type IRouter } from "express";
+import { Router, type IRouter, type NextFunction, type Response } from "express";
 import { db } from "@workspace/db";
 import { schoolsTable } from "@workspace/db/schema";
 import { type AuthenticatedRequest } from "../middlewares/auth.js";
@@ -8,13 +8,32 @@ import { eq } from "drizzle-orm";
 
 const router: IRouter = Router();
 
+const registrationAttempts = new Map<string, { count: number; resetAt: number }>();
+const REGISTRATION_WINDOW_MS = 15 * 60 * 1000;
+const REGISTRATION_MAX_ATTEMPTS = 5;
+
+function registrationRateLimit(req: AuthenticatedRequest, res: Response, next: NextFunction): void {
+  const now = Date.now();
+  const key = req.ip || req.socket.remoteAddress || "unknown";
+  const current = registrationAttempts.get(key);
+  const attempt = !current || current.resetAt <= now ? { count: 1, resetAt: now + REGISTRATION_WINDOW_MS } : { count: current.count + 1, resetAt: current.resetAt };
+  registrationAttempts.set(key, attempt);
+
+  if (attempt.count > REGISTRATION_MAX_ATTEMPTS) {
+    res.setHeader("Retry-After", Math.ceil((attempt.resetAt - now) / 1000));
+    res.status(429).json({ error: "Too many registration attempts" });
+    return;
+  }
+  next();
+}
+
 // Generate a secure API key
 function generateApiKey(): string {
   return `sk-${crypto.randomBytes(32).toString('hex')}`;
 }
 
 // Register a new school (first-time setup)
-router.post("/register-school", async (req: AuthenticatedRequest, res): Promise<any> => {
+router.post("/register-school", registrationRateLimit, async (req: AuthenticatedRequest, res): Promise<any> => {
   try {
     const registrationSecret = process.env.REGISTRATION_SECRET;
     if (!registrationSecret || process.env.ALLOW_PUBLIC_REGISTRATION !== "true") {

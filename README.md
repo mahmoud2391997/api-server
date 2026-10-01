@@ -45,7 +45,9 @@ Configure these values in Vercel **Project Settings → Environment Variables**.
 | `DATABASE_URL` | Required | PostgreSQL connection string. The DB module checks this when the app loads; the health route also requires it to be set. Prefer a serverless-friendly connection pooler where appropriate. |
 | `MONGODB_URI` | Needed for library data routes | MongoDB connection string. |
 | `MONGODB_DB` | Optional | Defaults to `al_bassam_school`. |
-| `FRONTEND_URL` | Needed for browser clients | Exact frontend origin allowed by CORS. |
+| `FRONTEND_URL` | Needed for browser clients | Exact deployed web app origin allowed by CORS; multiple origins may be comma-separated, for example `https://school.example,https://admin.example`. |
+| `ALLOW_PUBLIC_REGISTRATION` | Required for registration policy | Set to `true` only when unauthenticated registration should be enabled. Any other value blocks registration. |
+| `REGISTRATION_SECRET` | Required when public registration is enabled | Secret sent as `X-Registration-Secret` for `POST /api/register-school`. Keep it in Vercel secrets. |
 | `MISTRAL_API_KEY` | Optional | Enables chat; without it, the chat endpoint returns 503. Store secrets only in Vercel, not in Git. |
 | `MISTRAL_MODEL` | Optional | Defaults to `mistral-small-latest`. |
 | `LOG_LEVEL` | Optional | Defaults to `info`. |
@@ -56,10 +58,38 @@ After deployment, verify `GET https://<deployment>/api/healthz` returns `{"statu
 
 ## API endpoints
 
+Public endpoints:
+
 - `GET /api/healthz` — health check
-- `POST /api/register-school` — register a new school (first-time setup)
-- `GET /api/school-info` — get current school information (requires API key)
-- `/api/*` — school, library, and chat routes defined in `src/routes/`
+- `POST /api/register-school` — register a school; requires registration to be enabled and the configured `X-Registration-Secret`, and is rate limited to 5 attempts per IP per 15 minutes
+
+Authenticated endpoints (send `X-API-Key`):
+
+- `GET /api/school-info`
+- `GET /api/library/student-data`
+- `POST /api/library/sync`
+- `GET|POST /api/students`, `DELETE /api/students/:id`
+- `GET|POST /api/teachers`, `DELETE /api/teachers/:id`
+- `GET|POST|PATCH|DELETE /api/library/books` and `/api/library/books/:id`
+- `GET|POST|PATCH /api/library/borrows` and `/api/library/borrows/:id/return`
+- `GET|POST /api/attendance`
+- `GET /api/academic-years`, `/api/dashboard/summary`, and `/api/borrows/due-today`
+- `POST /api/chat`
+
+Every `/api` route except health and registration requires a valid active school API key. CORS preflight requests are handled before API-key authentication, and requests without an `Origin` header remain allowed for the desktop app. The API key is resolved to the school for every request; library sync never falls back to a default school.
+
+### Desktop library sync
+
+The desktop app sends its school key on every sync request:
+
+```bash
+curl -X POST https://<api-deployment>/api/library/sync \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: sk-your-school-key" \
+  -d '{"books": [], "borrows": []}'
+```
+
+The server scopes the sync to the school associated with that key. Do not put the key in a browser-visible frontend bundle.
 
 ## Multi-School Support
 
@@ -70,6 +100,8 @@ The API supports multiple schools with data isolation. Each school has:
 - **Independent Operations**: Each school operates independently with its own data
 
 ### First-Time Setup
+
+Registration is blocked unless `ALLOW_PUBLIC_REGISTRATION=true` and the request includes `X-Registration-Secret` matching `REGISTRATION_SECRET`. This protects school creation from strangers; keep public registration disabled after onboarding when possible.
 
 When setting up a new school:
 
