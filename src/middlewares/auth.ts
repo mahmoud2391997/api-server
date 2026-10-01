@@ -17,11 +17,6 @@ export interface AuthenticatedRequest extends Request {
 export async function apiKeyAuth(req: AuthenticatedRequest, res: Response, next: NextFunction) {
   const apiKey = req.headers["x-api-key"] as string;
 
-  // Skip auth for health check in development
-  if (process.env.NODE_ENV === "development" && req.path === "/api/healthz") {
-    return next();
-  }
-
   if (!apiKey) {
     logger.warn({ path: req.path }, "API key missing");
     return res.status(401).json({ error: "API key is required" });
@@ -54,7 +49,7 @@ export async function apiKeyAuth(req: AuthenticatedRequest, res: Response, next:
       code: school.code,
     };
 
-    next();
+    return next();
   } catch (error) {
     logger.error({ err: error }, "Authentication error");
     return res.status(500).json({ error: "Authentication failed" });
