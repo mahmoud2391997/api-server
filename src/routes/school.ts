@@ -540,7 +540,10 @@ router.get("/library/books", async (req, res): Promise<void> => {
   }
   const { search, category } = parsed.data;
   const filters = [eq(booksTable.schoolId, schoolId)];
-  if (search) filters.push(or(ilike(booksTable.title, `%${search}%`), ilike(booksTable.author, `%${search}%`), ilike(booksTable.isbn, `%${search}%`)));
+  if (search) {
+    const searchCondition = or(ilike(booksTable.title, `%${search}%`), ilike(booksTable.author, `%${search}%`), ilike(booksTable.isbn, `%${search}%`));
+    if (searchCondition) filters.push(searchCondition);
+  }
   if (category) filters.push(eq(booksTable.category, category));
   const rows = await db.select().from(booksTable)
     .where(and(...filters))
