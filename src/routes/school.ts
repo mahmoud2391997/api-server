@@ -5,6 +5,7 @@ import { academicYearsTable, attendanceTable, booksTable, bookCopiesTable, borro
 import { z } from "zod";
 import { getStudentLibraryFromMongo, syncLibraryToMongo } from "../lib/mongodb.js";
 import type { AuthenticatedRequest } from "../middlewares/auth.js";
+import { logger } from "../lib/logger.js";
 
 const MAX_GRADE = 12;
 const ARABIC_GRADES = ["الأول ابتدائي", "الثاني ابتدائي", "الثالث ابتدائي", "الرابع ابتدائي", "الخامس ابتدائي", "السادس ابتدائي", "الأول متوسط", "الثاني متوسط", "الثالث متوسط", "الأول ثانوي", "الثاني ثانوي", "الثالث ثانوي"];
@@ -87,8 +88,14 @@ import {
 
 const router: IRouter = Router();
 
-router.get("/library/student-data", async (_req, res): Promise<void> => {
-  const data = await getStudentLibraryFromMongo((_req as AuthenticatedRequest).schoolId || 1);
+router.get("/library/student-data", async (req, res): Promise<void> => {
+  const schoolId = (req as AuthenticatedRequest).schoolId;
+  if (!schoolId) {
+    res.status(401).json({ error: "Not authenticated" });
+    return;
+  }
+
+  const data = await getStudentLibraryFromMongo(schoolId);
   if (!data) {
     res.status(503).json({ error: "MongoDB is not configured" });
     return;
@@ -108,30 +115,135 @@ router.post("/library/sync", async (req, res): Promise<void> => {
     return;
   }
 
-  const synced = await syncLibraryToMongo({ schoolId, books: payload.books, borrows: payload.borrows });
-  if (!synced) {
-    res.status(503).json({ error: "MongoDB is not configured" });
-    return;
+  try {
+    // Sync books with upsert logic
+    for (const book of payload.books) {
+      const bookData = {
+        schoolId,
+        title: String(book.title || ""),
+        subtitle: String(book.subtitle || ""),
+        author: String(book.author || ""),
+        publisher: String(book.publisher || ""),
+        topic: String(book.topic || ""),
+        isbn: String(book.isbn || ""),
+        barcode: String(book.barcode || ""),
+        category: String(book.category || ""),
+        language: String(book.language || "Arabic"),
+        volume: String(book.volume || ""),
+        copies: Number(book.copies || 1),
+        availableCopies: Number(book.availableCopies || book.copies || 1),
+        dateAdded: String(book.dateAdded || new Date().toISOString().slice(0, 10)),
+        depositNumber: String(book.depositNumber || ""),
+        status: String(book.status || "available"),
+        publicationPlace: String(book.publicationPlace || ""),
+        publicationDate: String(book.publicationDate || ""),
+        generalNumber: String(book.generalNumber || ""),
+        specialNumber: String(book.specialNumber || ""),
+        description: String(book.description || ""),
+        coverImage: String(book.coverImage || ""),
+        shelf: String(book.shelf || ""),
+        lostCopies: Number(book.lostCopies || 0),
+        damagedCopies: Number(book.damagedCopies || 0),
+      };
+
+      // Check if book exists by isbn or title within the school
+      const [existing] = await db
+        .select()
+        .from(booksTable)
+        .where(
+          and(
+            eq(booksTable.schoolId, schoolId),
+            bookData.isbn ? eq(booksTable.isbn, bookData.isbn) : eq(booksTable.title, bookData.title)
+          )
+        )
+        .limit(1);
+
+      if (existing) {
+        // Update existing book
+        await db
+          .update(booksTable)
+          .set(bookData)
+          .where(eq(booksTable.id, existing.id));
+      } else {
+        // Insert new book
+        await db.insert(booksTable).values(bookData);
+      }
+    }
+
+    // Sync borrows with upsert logic
+    for (const borrow of payload.borrows) {
+      const borrowData = {
+        schoolId,
+        bookId: Number(borrow.bookId),
+        studentId: borrow.studentId ? Number(borrow.studentId) : null,
+        borrowerType: String(borrow.borrowerType || "student"),
+        borrowerId: borrow.borrowerId ? Number(borrow.borrowerId) : null,
+        borrowedAt: borrow.borrowedAt ? new Date(String(borrow.borrowedAt)) : new Date(),
+        dueDate: borrow.dueDate ? String(borrow.dueDate) : null,
+        returnedAt: borrow.returnedAt ? new Date(String(borrow.returnedAt)) : null,
+        condition: String(borrow.condition || "good"),
+      };
+
+      // Check if borrow exists by bookId, studentId, and borrowedAt within the school
+      const [existing] = await db
+        .select()
+        .from(borrowsTable)
+        .where(
+          and(
+            eq(borrowsTable.schoolId, schoolId),
+            eq(borrowsTable.bookId, borrowData.bookId),
+            borrowData.studentId ? eq(borrowsTable.studentId, borrowData.studentId) : undefined
+          )
+        )
+        .limit(1);
+
+      if (existing) {
+        // Update existing borrow
+        await db
+          .update(borrowsTable)
+          .set(borrowData)
+          .where(eq(borrowsTable.id, existing.id));
+      } else {
+        // Insert new borrow
+        await db.insert(borrowsTable).values(borrowData);
+      }
+    }
+
+    logger.info({
+      schoolId,
+      booksCount: payload.books.length,
+      borrowsCount: payload.borrows.length,
+    }, "Library sync completed");
+
+    res.json({ success: true });
+  } catch (error) {
+    logger.error({ err: error, schoolId }, "Library sync error");
+    res.status(500).json({ error: "Sync failed" });
   }
-  res.json({ ok: true });
 });
 
-router.get("/dashboard/summary", async (_req, res): Promise<void> => {
+router.get("/dashboard/summary", async (req, res): Promise<void> => {
+  const schoolId = (req as AuthenticatedRequest).schoolId;
+  if (!schoolId) {
+    res.status(401).json({ error: "Not authenticated" });
+    return;
+  }
+
   const [students, teachers, books, recent, borrowedBooks, availableBooks] = await Promise.all([
-    db.select({ id: studentsTable.id }).from(studentsTable).where(eq(studentsTable.status, "active")),
-    db.select({ id: teachersTable.id }).from(teachersTable).where(eq(teachersTable.status, "active")),
-    db.select({ id: booksTable.id }).from(booksTable),
+    db.select({ id: studentsTable.id }).from(studentsTable).where(and(eq(studentsTable.status, "active"), eq(studentsTable.schoolId, schoolId))),
+    db.select({ id: teachersTable.id }).from(teachersTable).where(and(eq(teachersTable.status, "active"), eq(teachersTable.schoolId, schoolId))),
+    db.select({ id: booksTable.id }).from(booksTable).where(eq(booksTable.schoolId, schoolId)),
     db.select({
       id: studentsTable.id,
       title: studentsTable.fullName,
       timestamp: studentsTable.createdAt,
-    }).from(studentsTable).orderBy(desc(studentsTable.createdAt)).limit(4),
+    }).from(studentsTable).where(eq(studentsTable.schoolId, schoolId)).orderBy(desc(studentsTable.createdAt)).limit(4),
     db.select({
       borrowed: sql<number>`COALESCE(SUM(${booksTable.copies} - ${booksTable.availableCopies} - ${booksTable.lostCopies} - ${booksTable.damagedCopies}), 0)`,
-    }).from(booksTable),
+    }).from(booksTable).where(eq(booksTable.schoolId, schoolId)),
     db.select({
       available: sql<number>`COALESCE(SUM(${booksTable.availableCopies}), 0)`,
-    }).from(booksTable),
+    }).from(booksTable).where(eq(booksTable.schoolId, schoolId)),
   ]);
   const borrowedCount = Math.max(0, Number(borrowedBooks[0]?.borrowed ?? 0));
   const availableCount = Number(availableBooks[0]?.available ?? 0);
@@ -154,7 +266,13 @@ router.get("/dashboard/summary", async (_req, res): Promise<void> => {
   }));
 });
 
-router.get("/borrows/due-today", async (_req, res): Promise<void> => {
+router.get("/borrows/due-today", async (req, res): Promise<void> => {
+  const schoolId = (req as AuthenticatedRequest).schoolId;
+  if (!schoolId) {
+    res.status(401).json({ error: "Not authenticated" });
+    return;
+  }
+
   const today = new Date().toISOString().slice(0, 10);
   const rows = await db.select({
     id: borrowsTable.id,
@@ -166,28 +284,40 @@ router.get("/borrows/due-today", async (_req, res): Promise<void> => {
   }).from(borrowsTable)
     .innerJoin(booksTable, eq(booksTable.id, borrowsTable.bookId))
     .leftJoin(studentsTable, eq(studentsTable.id, borrowsTable.studentId))
-    .where(and(eq(borrowsTable.dueDate, today), isNull(borrowsTable.returnedAt)))
+    .where(and(eq(borrowsTable.dueDate, today), isNull(borrowsTable.returnedAt), eq(borrowsTable.schoolId, schoolId)))
     .orderBy(booksTable.title);
   res.json(rows);
 });
 
 router.get("/students", async (req, res): Promise<void> => {
+  const schoolId = (req as AuthenticatedRequest).schoolId;
+  if (!schoolId) {
+    res.status(401).json({ error: "Not authenticated" });
+    return;
+  }
+
   const parsed = GetStudentsQueryParams.safeParse(req.query);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.message });
     return;
   }
   const { search, status } = parsed.data;
-  const filters = [];
+  const filters = [eq(studentsTable.schoolId, schoolId)];
   if (search) filters.push(ilike(studentsTable.fullName, `%${search}%`));
   if (status) filters.push(eq(studentsTable.status, status));
   const rows = await db.select().from(studentsTable)
-    .where(filters.length ? and(...filters) : undefined)
+    .where(and(...filters))
     .orderBy(desc(studentsTable.createdAt));
   res.json(GetStudentsResponse.parse(rows));
 });
 
 router.post("/students", async (req, res): Promise<void> => {
+  const schoolId = (req as AuthenticatedRequest).schoolId;
+  if (!schoolId) {
+    res.status(401).json({ error: "Not authenticated" });
+    return;
+  }
+
   const parsed = CreateStudentBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.message });
@@ -195,6 +325,7 @@ router.post("/students", async (req, res): Promise<void> => {
   }
   const [student] = await db.insert(studentsTable).values({
     ...parsed.data,
+    schoolId,
     enrollmentDate: parsed.data.enrollmentDate.toISOString().slice(0, 10),
   }).returning();
   res.status(201).json(CreateStudentResponse.parse(student));
@@ -237,22 +368,34 @@ router.delete("/students/:id", async (req, res): Promise<void> => {
 });
 
 router.get("/teachers", async (req, res): Promise<void> => {
+  const schoolId = (req as AuthenticatedRequest).schoolId;
+  if (!schoolId) {
+    res.status(401).json({ error: "Not authenticated" });
+    return;
+  }
+
   const parsed = GetTeachersQueryParams.safeParse(req.query);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.message });
     return;
   }
   const { search, status } = parsed.data;
-  const filters = [];
+  const filters = [eq(teachersTable.schoolId, schoolId)];
   if (search) filters.push(ilike(teachersTable.fullName, `%${search}%`));
   if (status) filters.push(eq(teachersTable.status, status));
   const rows = await db.select().from(teachersTable)
-    .where(filters.length ? and(...filters) : undefined)
+    .where(and(...filters))
     .orderBy(teachersTable.fullName);
   res.json(GetTeachersResponse.parse(rows));
 });
 
 router.post("/teachers", async (req, res): Promise<void> => {
+  const schoolId = (req as AuthenticatedRequest).schoolId;
+  if (!schoolId) {
+    res.status(401).json({ error: "Not authenticated" });
+    return;
+  }
+
   const parsed = CreateTeacherBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.message });
@@ -261,6 +404,7 @@ router.post("/teachers", async (req, res): Promise<void> => {
   const { password, isEmployee, fullName, fullNameArabic, ...rest } = parsed.data;
   const [teacher] = await db.insert(teachersTable).values({
     ...rest,
+    schoolId,
     fullName: fullName || [rest.name, rest.surname].filter(Boolean).join(" "),
     fullNameArabic: fullNameArabic || [rest.name, rest.surname].filter(Boolean).join(" "),
     password: password ?? "",
@@ -383,17 +527,23 @@ router.delete("/teachers/:id", async (req, res): Promise<void> => {
 // });
 
 router.get("/library/books", async (req, res): Promise<void> => {
+  const schoolId = (req as AuthenticatedRequest).schoolId;
+  if (!schoolId) {
+    res.status(401).json({ error: "Not authenticated" });
+    return;
+  }
+
   const parsed = GetBooksQueryParams.safeParse(req.query);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.message });
     return;
   }
   const { search, category } = parsed.data;
-  const filters = [];
+  const filters = [eq(booksTable.schoolId, schoolId)];
   if (search) filters.push(or(ilike(booksTable.title, `%${search}%`), ilike(booksTable.author, `%${search}%`), ilike(booksTable.isbn, `%${search}%`)));
   if (category) filters.push(eq(booksTable.category, category));
   const rows = await db.select().from(booksTable)
-    .where(filters.length ? and(...filters) : undefined)
+    .where(and(...filters))
     .orderBy(booksTable.title);
   const books = await Promise.all(rows.map(async (book) => {
     const copies = await db.select({ barcode: bookCopiesTable.barcode, status: bookCopiesTable.status })
@@ -410,6 +560,12 @@ router.get("/library/books", async (req, res): Promise<void> => {
 });
 
 router.post("/library/books", async (req, res): Promise<void> => {
+  const schoolId = (req as AuthenticatedRequest).schoolId;
+  if (!schoolId) {
+    res.status(401).json({ error: "Not authenticated" });
+    return;
+  }
+
   const parsed = CreateBookBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.message });
@@ -418,6 +574,7 @@ router.post("/library/books", async (req, res): Promise<void> => {
   const copies = parsed.data.copies ?? 1;
   const [book] = await db.insert(booksTable).values({
     ...parsed.data,
+    schoolId,
     category: parsed.data.category ?? "",
     author: parsed.data.author ?? "",
     language: parsed.data.language ?? "Arabic",
