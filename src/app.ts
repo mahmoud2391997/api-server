@@ -34,25 +34,16 @@ const allowedOrigins = new Set(
     process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : undefined,
   ].filter((origin): origin is string => Boolean(origin)),
 );
-
 const corsOptions = {
-  origin(origin: string | undefined, callback: (error: Error | null, allowed?: boolean) => void) {
-    // Desktop Electron requests may not send an Origin header.
-    if (!origin || allowedOrigins.has(origin) || process.env.NODE_ENV === "development") {
-      callback(null, true);
-      return;
-    }
-
-    callback(new Error("Origin is not allowed"));
-  },
-  credentials: true,
-  methods: ["GET", "POST", "PATCH", "DELETE", "PUT", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization", "X-API-Key"],
+  origin: true,          // allow any origin (reflects the caller's origin)
+  credentials: false,    // no cookies are used, so this must stay off
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization", "X-API-Key", "X-Registration-Secret"],
+  maxAge: 86400,
 };
 
 app.use(cors(corsOptions));
-app.options(/.*/, cors(corsOptions));
-app.use(express.json());
+app.options(/.*/, cors(corsOptions));app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // Public routes (no auth required)
