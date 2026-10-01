@@ -14,8 +14,17 @@ function generateApiKey(): string {
 }
 
 // Register a new school (first-time setup)
-router.post("/register-school", async (req: AuthenticatedRequest, res) => {
+router.post("/register-school", async (req: AuthenticatedRequest, res): Promise<any> => {
   try {
+    const registrationSecret = process.env.REGISTRATION_SECRET;
+    if (!registrationSecret || process.env.ALLOW_PUBLIC_REGISTRATION !== "true") {
+      const supplied = req.header("X-Registration-Secret");
+      const suppliedBuffer = Buffer.from(supplied || "");
+      const expectedBuffer = Buffer.from(registrationSecret || "");
+      if (!supplied || suppliedBuffer.length !== expectedBuffer.length || !crypto.timingSafeEqual(suppliedBuffer, expectedBuffer)) {
+        return res.status(403).json({ error: "Registration is protected" });
+      }
+    }
     const { name, nameArabic, code, address, phone, email, principalName, establishedDate } = req.body;
 
     if (!name || !nameArabic || !code) {
@@ -34,6 +43,7 @@ router.post("/register-school", async (req: AuthenticatedRequest, res) => {
     }
 
     const apiKey = generateApiKey();
+    const apiKeyHash = crypto.createHash("sha256").update(apiKey).digest("hex");
 
     const newSchool = await db
       .insert(schoolsTable)
@@ -46,7 +56,9 @@ router.post("/register-school", async (req: AuthenticatedRequest, res) => {
         email: email || "",
         principalName: principalName || "",
         establishedDate: establishedDate || null,
-        apiKey,
+        apiKey: null,
+        apiKeyHash,
+        apiKeyPrefix: apiKey.slice(0, 11),
         isActive: true,
       })
       .returning();
@@ -70,7 +82,7 @@ router.post("/register-school", async (req: AuthenticatedRequest, res) => {
 });
 
 // Get current school info (requires auth)
-router.get("/school-info", async (req: AuthenticatedRequest, res) => {
+router.get("/school-info", async (req: AuthenticatedRequest, res): Promise<any> => {
   try {
     if (!req.schoolId) {
       return res.status(401).json({ error: "Not authenticated" });
