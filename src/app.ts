@@ -46,23 +46,34 @@ app.use(cors(corsOptions));
 app.options(/.*/, cors(corsOptions));app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Every desktop-app request must include the server-side application key.
-app.use(desktopApiKeyAuth);
-
-// Public routes do not require a school-specific key.
+// Public routes do not require authentication.
 app.use("/api/healthz", (req, res, next) => next());
-app.use("/api/register-school", (req, res, next) => next());
 
-// Student routes
-app.use("/api/student/login", (req, res, next) => next());
-app.use("/api/student", studentAuth);
-app.use("/api/student", studentRouter);
+// Student login is public; all other student routes use JWT authentication only.
+app.use("/api/student", (req, res, next) => {
+  if (req.path === "/login") return next();
+  return studentAuth(req, res, next);
+}, studentRouter);
 
-// Admin routes: require API key
-app.use("/api/admin", apiKeyAuth);
+// Desktop-only routes use the server-side application key. Both sync route
+// variants are mounted in this project and must remain protected.
+app.use(["/api/register-school", "/api/school-info", "/api/sync", "/api/library/sync"], desktopApiKeyAuth);
 
-// All other API routes: require API key
-app.use("/api", apiKeyAuth);
+// The admin route and remaining API routes use the school-specific API key.
+// Desktop-only routes are intentionally excluded because they authenticate via
+// their own route-specific mechanism above.
+app.use("/api", (req, res, next) => {
+  if (
+    req.path === "/register-school" ||
+    req.path === "/school-info" ||
+    req.path === "/sync" ||
+    req.path === "/library/sync" ||
+    req.path.startsWith("/student")
+  ) {
+    return next();
+  }
+  return apiKeyAuth(req, res, next);
+});
 
 app.use("/api", router);
 
