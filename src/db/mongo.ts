@@ -53,7 +53,7 @@ export const collections = {
 } as const;
 
 export type SchoolDocument = MongoDocument & { name: string; nameArabic: string; code: string; apiKeyHash: string; isActive: boolean };
-export type StudentAccessDocument = MongoDocument & { schoolId: number; passwordHash: string; isActive: boolean; mode: string; studentId?: number | null };
+export type StudentAccessDocument = MongoDocument & { schoolId: number; passwordHash: string; isActive: boolean; mode: string; studentId?: number | null; username?: string };
 export type BookDocument = MongoDocument & { schoolId: number; title: string; author?: string; isbn?: string; availableCopies: number; copies: number };
 export type BorrowDocument = MongoDocument & { schoolId: number; bookId: number; studentId?: number | null; returnedAt?: Date | null; borrowedAt: Date; dueDate?: string | null };
 export type StudentDocument = MongoDocument & { schoolId: number; fullName: string; status: string; createdAt: Date; grade?: string };
@@ -89,5 +89,6 @@ export async function ensureMongoIndexes(): Promise<void> {
     db.collection("book_copies").createIndexes([{ key: { barcode: 1 }, unique: true }, { key: { bookId: 1, copyNumber: 1 }, unique: true }]),
     db.collection("borrows").createIndexes([{ key: { schoolId: 1, returnedAt: 1, dueDate: 1 } }, { key: { schoolId: 1, bookId: 1 } }]),
     db.collection("student_access").createIndex({ schoolId: 1, mode: 1, studentId: 1 }, { unique: true }),
+    db.collection("student_access").createIndex({ schoolId: 1, username: 1 }, { unique: true, partialFilterExpression: { username: { $type: "string" } } }),
   ]);
 }

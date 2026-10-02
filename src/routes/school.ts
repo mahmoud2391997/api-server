@@ -7,6 +7,7 @@ import { getStudentLibraryFromMongo, syncLibraryToMongo } from "../lib/mongodb.j
 import type { AuthenticatedRequest } from "../middlewares/auth.js";
 import { logger } from "../lib/logger.js";
 import argon2 from "argon2";
+import { collections, getCollection, nextId, type StudentAccessDocument, type StudentDocument } from "../db/mongo.js";
 
 const MAX_GRADE = 12;
 const ARABIC_GRADES = ["الأول ابتدائي", "الثاني ابتدائي", "الثالث ابتدائي", "الرابع ابتدائي", "الخامس ابتدائي", "السادس ابتدائي", "الأول متوسط", "الثاني متوسط", "الثالث متوسط", "الأول ثانوي", "الثاني ثانوي", "الثالث ثانوي"];
@@ -989,6 +990,129 @@ router.get("/academic-years", async (req, res): Promise<void> => {
     ...row,
     isCurrent: row.isCurrent === "true",
   }))));
+});
+
+router.put("/admin/student-accounts/sync", async (req, res): Promise<void> => {
+  const schoolId = (req as AuthenticatedRequest).schoolId;
+  if (!schoolId) { res.status(401).json({ error: "Not authenticated" }); return; }
+
+  const schema = z.object({
+    students: z.array(z.object({
+      id: z.number().int().positive(),
+      studentNumber: z.string().trim().min(1).max(100),
+      fullName: z.string().trim().min(1).max(200),
+      fullNameArabic: z.string().max(200).optional().default(""),
+      grade: z.string().max(80).optional().default(""),
+      className: z.string().max(100).optional().default(""),
+      status: z.enum(["active", "inactive"]).default("active"),
+    })).max(200),
+    accounts: z.array(z.object({
+      studentId: z.number().int().positive(),
+      username: z.string().trim().toLowerCase().min(3).max(80).regex(/^[a-z0-9._-]+$/),
+      password: z.string().min(12).max(128),
+    })).max(200),
+    completeStudentIds: z.array(z.number().int().positive()).max(10000).optional(),
+  });
+  const parsed = schema.safeParse(req.body);
+  if (!parsed.success) { res.status(400).json({ error: "Invalid student roster or credentials" }); return; }
+
+  const studentIds = new Set<number>();
+  const studentNumbers = new Set<string>();
+  for (const student of parsed.data.students) {
+    if (studentIds.has(student.id) || studentNumbers.has(student.studentNumber.toLowerCase())) {
+      res.status(400).json({ error: "Student IDs and student numbers must be unique within the roster" }); return;
+    }
+    studentIds.add(student.id);
+    studentNumbers.add(student.studentNumber.toLowerCase());
+  }
+  const accountIds = new Set<number>();
+  const usernames = new Set<string>();
+  for (const account of parsed.data.accounts) {
+    if (!studentIds.has(account.studentId) || accountIds.has(account.studentId) || usernames.has(account.username)) {
+      res.status(400).json({ error: "Each account must map to one active student with a unique username" }); return;
+    }
+    if (parsed.data.students.find((student) => student.id === account.studentId)?.status !== "active") {
+      res.status(400).json({ error: "Only active students can receive login accounts" }); return;
+    }
+    accountIds.add(account.studentId);
+    usernames.add(account.username);
+  }
+  if (parsed.data.completeStudentIds) {
+    const completeIds = new Set(parsed.data.completeStudentIds);
+    if (completeIds.size !== parsed.data.completeStudentIds.length || parsed.data.students.some((student) => !completeIds.has(student.id))) {
+      res.status(400).json({ error: "Complete roster identifiers are invalid" }); return;
+    }
+  }
+
+  try {
+    const passwordHashes = new Map<number, string>();
+    for (let index = 0; index < parsed.data.accounts.length; index += 4) {
+      const batch = parsed.data.accounts.slice(index, index + 4);
+      const hashes = await Promise.all(batch.map((account) => argon2.hash(account.password)));
+      batch.forEach((account, offset) => passwordHashes.set(account.studentId, hashes[offset]));
+    }
+    const studentCollection = await getCollection<StudentDocument>(collections.students);
+    const accessCollection = await getCollection<StudentAccessDocument>(collections.studentAccess);
+    const studentsById = new Map(parsed.data.students.map((student) => [student.id, student]));
+    const accountsById = new Map(parsed.data.accounts.map((account) => [account.studentId, account]));
+    const now = new Date();
+    let createdAccounts = 0;
+    let updatedAccounts = 0;
+
+    for (const student of parsed.data.students) {
+      await studentCollection.updateOne(
+        { id: student.id, schoolId },
+        { $set: { ...student, schoolId, syncedAt: now }, $setOnInsert: { createdAt: now } },
+        { upsert: true },
+      );
+      const existing = await accessCollection.findOne({ schoolId, studentId: student.id, mode: "individual" });
+      const account = accountsById.get(student.id);
+      if (account) {
+        const passwordHash = passwordHashes.get(account.studentId);
+        if (!passwordHash) throw new Error("Failed to hash an individual student password");
+        if (existing) {
+          await accessCollection.updateOne(
+            { id: existing.id, schoolId },
+            { $set: { username: account.username, passwordHash, isActive: true, updatedAt: now } },
+          );
+          updatedAccounts += 1;
+        } else {
+          await accessCollection.insertOne({
+            id: await nextId("student_access"), schoolId, studentId: student.id,
+            username: account.username, passwordHash, mode: "individual", isActive: true, createdAt: now, updatedAt: now,
+          } as StudentAccessDocument);
+          createdAccounts += 1;
+        }
+      } else if (existing) {
+        await accessCollection.updateOne(
+          { id: existing.id, schoolId },
+          { $set: { isActive: student.status === "active", updatedAt: now } },
+        );
+      }
+    }
+
+    if (parsed.data.completeStudentIds) {
+      const completeIds = parsed.data.completeStudentIds;
+      await Promise.all([
+        accessCollection.updateMany(
+          { schoolId, mode: "individual", studentId: { $nin: completeIds }, isActive: true },
+          { $set: { isActive: false, updatedAt: now } },
+        ),
+        studentCollection.updateMany(
+          { schoolId, id: { $nin: completeIds }, status: { $ne: "inactive" } },
+          { $set: { status: "inactive", syncedAt: now } },
+        ),
+      ]);
+    }
+
+    logger.info({ schoolId, students: studentsById.size, createdAccounts, updatedAccounts }, "Student roster and individual accounts synced");
+    res.json({ ok: true, syncedStudents: studentsById.size, createdAccounts, updatedAccounts });
+  } catch (error) {
+    logger.error({ err: error, schoolId }, "Student roster sync failed");
+    const duplicateKey = typeof error === "object" && error !== null && "code" in error && (error as { code?: unknown }).code === 11000;
+    if (duplicateKey) { res.status(409).json({ error: "A student number or username is already assigned to a different student" }); return; }
+    res.status(500).json({ error: "Failed to sync student roster and accounts" });
+  }
 });
 
 router.put("/admin/student-access", async (req, res): Promise<void> => {

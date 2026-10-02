@@ -1,7 +1,10 @@
 import { Request, Response, NextFunction } from "express";
 import crypto from "node:crypto";
 import jwt from "jsonwebtoken";
-import { collections, getCollection, type SchoolDocument, type StudentAccessDocument } from "../db/mongo.js";
+import { and, eq } from "drizzle-orm";
+import { db } from "@workspace/db";
+import { studentAccessTable } from "@workspace/db/schema";
+import { collections, getCollection, type SchoolDocument, type StudentAccessDocument, type StudentDocument } from "../db/mongo.js";
 import { logger } from "../lib/logger.js";
 
 export function desktopApiKeyAuth(req: Request, res: Response, next: NextFunction) {
@@ -15,7 +18,7 @@ export function desktopApiKeyAuth(req: Request, res: Response, next: NextFunctio
   return next();
 }
 
-export interface AuthenticatedRequest extends Request { schoolId?: number; school?: { id: number; name: string; code: string }; role?: "admin" | "student"; }
+export interface AuthenticatedRequest extends Request { schoolId?: number; studentId?: number; school?: { id: number; name: string; code: string }; role?: "admin" | "student"; }
 
 export async function apiKeyAuth(req: AuthenticatedRequest, res: Response, next: NextFunction) {
   const apiKey = req.headers["x-api-key"] as string | undefined;
@@ -37,13 +40,30 @@ export async function studentAuth(req: AuthenticatedRequest, res: Response, next
   const secret = process.env.JWT_SECRET;
   if (!secret) return res.status(500).json({ error: "Server configuration error" });
   try {
-    const decoded = jwt.verify(authHeader.substring(7), secret) as { role: string; schoolId: number };
+    const decoded = jwt.verify(authHeader.substring(7), secret) as { role: string; schoolId: number; studentId?: number };
     if (decoded.role !== "student") return res.status(403).json({ error: "Invalid token" });
     const schools = await getCollection<SchoolDocument>(collections.schools);
     const school = await schools.findOne({ id: decoded.schoolId, isActive: true });
     if (!school) return res.status(403).json({ error: "School not found or inactive" });
     const access = await getCollection<StudentAccessDocument>(collections.studentAccess);
-    if (!await access.findOne({ schoolId: decoded.schoolId, isActive: true })) return res.status(403).json({ error: "Student access not configured" });
+    if (Number.isInteger(decoded.studentId) && Number(decoded.studentId) > 0) {
+      const studentId = Number(decoded.studentId);
+      const [account, student] = await Promise.all([
+        access.findOne({ schoolId: school.id, studentId, mode: "individual", isActive: true }),
+        (await getCollection<StudentDocument>(collections.students)).findOne({ id: studentId, schoolId: school.id, status: "active" }),
+      ]);
+      if (!account || !student) return res.status(403).json({ error: "Student account is inactive" });
+      req.studentId = studentId;
+    } else {
+      const [shared] = await db.select({ id: studentAccessTable.id }).from(studentAccessTable).where(and(
+        eq(studentAccessTable.schoolId, school.id),
+        eq(studentAccessTable.mode, "shared"),
+        eq(studentAccessTable.isActive, true),
+      )).limit(1);
+      if (!shared && !await access.findOne({ schoolId: school.id, mode: { $ne: "individual" }, isActive: true })) {
+        return res.status(403).json({ error: "Student access not configured" });
+      }
+    }
     req.schoolId = school.id; req.school = { id: school.id, name: school.name, code: school.code }; req.role = "student"; return next();
   } catch (error) { logger.warn({ err: error }, "Student token verification failed"); return res.status(401).json({ error: "Invalid or expired token" }); }
 }
