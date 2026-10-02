@@ -48,6 +48,7 @@ Configure these values in Vercel **Project Settings → Environment Variables**.
 | `FRONTEND_URL` | Needed for browser clients | Exact deployed web app origin allowed by CORS; multiple origins may be comma-separated, for example `https://school.example,https://admin.example`. |
 | `ALLOW_PUBLIC_REGISTRATION` | Required for registration policy | Set to `true` only when unauthenticated registration should be enabled. Any other value blocks registration. |
 | `REGISTRATION_SECRET` | Required when public registration is enabled | Secret sent as `X-Registration-Secret` for `POST /api/register-school`. Keep it in Vercel secrets. |
+| `api_key` | Required for desktop-only routes | Shared server-side key expected in `X-App-API-Key` for `/api/register-school`, `/api/school-info`, and `/api/sync/*` desktop routes. Keep it in Vercel secrets. |
 | `MISTRAL_API_KEY` | Optional | Enables chat; without it, the chat endpoint returns 503. Store secrets only in Vercel, not in Git. |
 | `MISTRAL_MODEL` | Optional | Defaults to `mistral-small-latest`. |
 | `LOG_LEVEL` | Optional | Defaults to `info`. |
