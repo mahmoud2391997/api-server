@@ -6,6 +6,38 @@ import { schoolsTable, studentAccessTable } from "@workspace/db/schema";
 import { eq, and } from "drizzle-orm";
 import { logger } from "../lib/logger.js";
 
+export function desktopApiKeyAuth(req: Request, res: Response, next: NextFunction) {
+  if (req.method === "OPTIONS") {
+    return next();
+  }
+
+  const expectedKey = process.env.api_key;
+  const providedKey = req.header("X-App-API-Key");
+
+  if (!expectedKey) {
+    logger.error("api_key environment variable is not set");
+    return res.status(500).json({ error: "Server configuration error" });
+  }
+
+  if (!providedKey) {
+    logger.warn({ path: req.path }, "Desktop API key missing");
+    return res.status(401).json({ error: "Desktop API key is required" });
+  }
+
+  const expectedBuffer = Buffer.from(expectedKey, "utf8");
+  const providedBuffer = Buffer.from(providedKey, "utf8");
+
+  if (
+    expectedBuffer.length !== providedBuffer.length ||
+    !crypto.timingSafeEqual(expectedBuffer, providedBuffer)
+  ) {
+    logger.warn({ path: req.path }, "Invalid desktop API key");
+    return res.status(403).json({ error: "Invalid desktop API key" });
+  }
+
+  return next();
+}
+
 export interface AuthenticatedRequest extends Request {
   schoolId?: number;
   school?: {

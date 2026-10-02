@@ -4,7 +4,7 @@ import pinoHttpModule from "pino-http";
 import router from "./routes/index.js";
 import studentRouter from "./routes/student.js";
 import { logger } from "./lib/logger.js";
-import { apiKeyAuth, studentAuth } from "./middlewares/auth.js";
+import { apiKeyAuth, desktopApiKeyAuth, studentAuth } from "./middlewares/auth.js";
 
 const pinoHttp = pinoHttpModule as unknown as (options: Record<string, unknown>) => express.RequestHandler;
 const app = express();
@@ -38,7 +38,7 @@ const corsOptions = {
   origin: true,          // allow any origin (reflects the caller's origin)
   credentials: false,    // no cookies are used, so this must stay off
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization", "X-API-Key", "X-Registration-Secret"],
+  allowedHeaders: ["Content-Type", "Authorization", "X-App-API-Key", "X-API-Key", "X-Registration-Secret"],
   maxAge: 86400,
 };
 
@@ -46,7 +46,10 @@ app.use(cors(corsOptions));
 app.options(/.*/, cors(corsOptions));app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Public routes (no auth required)
+// Every desktop-app request must include the server-side application key.
+app.use(desktopApiKeyAuth);
+
+// Public routes do not require a school-specific key.
 app.use("/api/healthz", (req, res, next) => next());
 app.use("/api/register-school", (req, res, next) => next());
 
