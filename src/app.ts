@@ -3,6 +3,7 @@ import cors from "cors";
 import pinoHttpModule from "pino-http";
 import router from "./routes/index.js";
 import studentRouter from "./routes/student.js";
+import healthRouter from "./routes/health.js";
 import { logger } from "./lib/logger.js";
 import { apiKeyAuth, desktopApiKeyAuth, studentAuth } from "./middlewares/auth.js";
 
@@ -46,34 +47,27 @@ app.use(cors(corsOptions));
 app.options(/.*/, cors(corsOptions));app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Public routes do not require authentication.
-app.use("/api/healthz", (req, res, next) => next());
+// --- Public routes (no keys) ---
+app.use("/api", healthRouter); // GET /api/healthz
 
-// Student login is public; all other student routes use JWT authentication only.
-app.use("/api/student", (req, res, next) => {
-  if (req.path === "/login") return next();
-  return studentAuth(req, res, next);
-}, studentRouter);
+// --- Student routes: own JWT auth, no desktop key, no school key ---
+app.use("/api/student", (req, res, next) =>
+  req.path === "/login" ? next() : studentAuth(req, res, next),
+);
+app.use("/api/student", studentRouter);
 
-// Desktop-only routes use the server-side application key. Both sync route
-// variants are mounted in this project and must remain protected.
-app.use(["/api/register-school", "/api/school-info", "/api/sync", "/api/library/sync"], desktopApiKeyAuth);
+// --- Desktop-only routes: require the server-side app key (env: api_key) ---
+const DESKTOP_ONLY = ["/register-school", "/school-info", "/sync", "/admin"];
+app.use("/api", (req, res, next) =>
+  DESKTOP_ONLY.some((p) => req.path === p || req.path.startsWith(`${p}/`))
+    ? desktopApiKeyAuth(req, res, next)
+    : next(),
+);
 
-// The admin route and remaining API routes use the school-specific API key.
-// Desktop-only routes are intentionally excluded because they authenticate via
-// their own route-specific mechanism above.
-app.use("/api", (req, res, next) => {
-  if (
-    req.path === "/register-school" ||
-    req.path === "/school-info" ||
-    req.path === "/sync" ||
-    req.path === "/library/sync" ||
-    req.path.startsWith("/student")
-  ) {
-    return next();
-  }
-  return apiKeyAuth(req, res, next);
-});
+// --- Per-school key (X-API-Key) for everything except school registration ---
+app.use("/api", (req, res, next) =>
+  req.path === "/register-school" ? next() : apiKeyAuth(req, res, next),
+);
 
 app.use("/api", router);
 
