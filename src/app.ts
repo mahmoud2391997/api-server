@@ -6,9 +6,12 @@ import studentRouter from "./routes/student.js";
 import healthRouter from "./routes/health.js";
 import { logger } from "./lib/logger.js";
 import { apiKeyAuth, desktopApiKeyAuth, studentAuth } from "./middlewares/auth.js";
+import { ensureMongoIndexes } from "./db/mongo.js";
 
 const pinoHttp = pinoHttpModule as unknown as (options: Record<string, unknown>) => express.RequestHandler;
 const app = express();
+
+void ensureMongoIndexes().catch((error) => logger.error({ err: error }, "MongoDB index initialization failed"));
 
 app.use(
   pinoHttp({

@@ -1,7 +1,7 @@
 import { Router, type IRouter } from "express";
-import { desc, eq, isNull, sql } from "drizzle-orm";
-import { db, booksTable, borrowsTable, studentsTable, teachersTable } from "@workspace/db";
+import { collections, getCollection, type BookDocument, type BorrowDocument, type StudentDocument, type TeacherDocument } from "../db/mongo.js";
 import { z } from "zod";
+import type { AuthenticatedRequest } from "../middlewares/auth.js";
 
 const router: IRouter = Router();
 const chatBody = z.object({
@@ -9,15 +9,24 @@ const chatBody = z.object({
   history: z.array(z.object({ role: z.enum(["user", "assistant"]), content: z.string().max(4000) })).max(12).optional(),
 });
 
-async function getSchoolContext() {
-  const [students, teachers, books, loans, counts] = await Promise.all([
-    db.select({ id: studentsTable.id, name: studentsTable.fullName, status: studentsTable.status, grade: studentsTable.grade }).from(studentsTable).orderBy(desc(studentsTable.createdAt)).limit(100),
-    db.select({ id: teachersTable.id, name: teachersTable.fullName, status: teachersTable.status, subject: teachersTable.subject }).from(teachersTable).orderBy(teachersTable.fullName).limit(100),
-    db.select({ id: booksTable.id, title: booksTable.title, author: booksTable.author, category: booksTable.category, copies: booksTable.copies, availableCopies: booksTable.availableCopies, lostCopies: booksTable.lostCopies, damagedCopies: booksTable.damagedCopies }).from(booksTable).orderBy(booksTable.title).limit(200),
-    db.select({ bookTitle: booksTable.title, borrowerName: studentsTable.fullName, dueDate: borrowsTable.dueDate, returnedAt: borrowsTable.returnedAt }).from(borrowsTable).innerJoin(booksTable, eq(borrowsTable.bookId, booksTable.id)).leftJoin(studentsTable, eq(borrowsTable.studentId, studentsTable.id)).where(isNull(borrowsTable.returnedAt)).orderBy(desc(borrowsTable.borrowedAt)).limit(100),
-    db.select({ students: sql<number>`count(*)` }).from(studentsTable),
+async function getSchoolContext(schoolId: number) {
+  const studentsCollection = await getCollection<StudentDocument>(collections.students);
+  const teachersCollection = await getCollection<TeacherDocument>(collections.teachers);
+  const booksCollection = await getCollection<BookDocument>(collections.books);
+  const borrowsCollection = await getCollection<BorrowDocument>(collections.borrows);
+  const [studentsRaw, teachersRaw, booksRaw, loansRaw] = await Promise.all([
+    studentsCollection.find({ schoolId }).sort({ createdAt: -1 }).limit(100).project({ _id: 0 }).toArray(),
+    teachersCollection.find({ schoolId }).sort({ fullName: 1 }).limit(100).project({ _id: 0 }).toArray(),
+    booksCollection.find({ schoolId }).sort({ title: 1 }).limit(200).project({ _id: 0 }).toArray(),
+    borrowsCollection.find({ schoolId, returnedAt: null }).sort({ borrowedAt: -1 }).limit(100).project({ _id: 0 }).toArray(),
   ]);
-  return { summary: { students: Number(counts[0]?.students ?? 0), teachers: teachers.length, books: books.length, availableCopies: books.reduce((sum: number, book) => sum + Number(book.availableCopies ?? 0), 0), activeLoans: loans.length }, students, teachers, books, activeLoans: loans };
+  const booksById = new Map(booksRaw.map((book) => [book.id, book]));
+  const studentsById = new Map(studentsRaw.map((student) => [student.id, student]));
+  const students = studentsRaw.map(({ id, fullName, status, grade }) => ({ id, name: fullName, status, grade }));
+  const teachers = teachersRaw.map(({ id, fullName, status, subject }) => ({ id, name: fullName, status, subject }));
+  const books = booksRaw.map(({ id, title, author, category, copies, availableCopies, lostCopies, damagedCopies }) => ({ id, title, author, category, copies, availableCopies, lostCopies, damagedCopies }));
+  const activeLoans = loansRaw.map((loan) => ({ bookTitle: booksById.get(loan.bookId)?.title, borrowerName: loan.studentId ? studentsById.get(loan.studentId)?.fullName : undefined, dueDate: loan.dueDate, returnedAt: loan.returnedAt }));
+  return { summary: { students: students.length, teachers: teachers.length, books: books.length, availableCopies: books.reduce((sum, book) => sum + Number(book.availableCopies ?? 0), 0), activeLoans: activeLoans.length }, students, teachers, books, activeLoans };
 }
 
 router.post("/chat", async (req, res): Promise<void> => {
@@ -26,7 +35,9 @@ router.post("/chat", async (req, res): Promise<void> => {
   const apiKey = process.env.MISTRAL_API_KEY;
   if (!apiKey) { res.status(503).json({ error: "The school assistant is not configured yet." }); return; }
   try {
-    const context = await getSchoolContext();
+    const schoolId = (req as AuthenticatedRequest).schoolId;
+    if (!schoolId) { res.status(401).json({ error: "Not authenticated" }); return; }
+    const context = await getSchoolContext(schoolId);
     const messages = [
       { role: "system", content: `You are Al-Bassam School's internal assistant. Answer questions about this school system using only the live data below. Be concise, helpful, and clear. Never invent records, passwords, or permissions. If the data does not answer the question, say so. You may answer in Arabic or English based on the user's language.\n\nLIVE SCHOOL DATA:\n${JSON.stringify(context)}` },
       ...(parsed.data.history ?? []).map((item) => ({ role: item.role, content: item.content })),
