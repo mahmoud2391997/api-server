@@ -66,6 +66,18 @@ beforeEach(() => {
 });
 
 describe("school registration student portal provisioning", () => {
+  it("generates and returns a branch code when desktop registration omits one", async () => {
+    const response = await fetch(`${baseUrl}/api/register-school`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Registration-Secret": "test-registration-secret" },
+      body: JSON.stringify({ name: "Generated Branch", nameArabic: "فرع مولد" }),
+    });
+    expect(response.status).toBe(201);
+    const result = await response.json() as Record<string, any>;
+    expect(result.school).toMatchObject({ id: 17, code: "BASSAM-0017" });
+    expect(result.apiKey).toMatch(/^sk-/);
+  });
+
   it("creates a school-scoped shared student login without returning the password hash", async () => {
     const response = await fetch(`${baseUrl}/api/register-school`, {
       method: "POST",

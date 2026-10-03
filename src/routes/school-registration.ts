@@ -19,7 +19,8 @@ function generateApiKey() { return `sk-${crypto.randomBytes(32).toString("hex")}
 const registrationSchema = z.object({
   name: z.string().trim().min(1),
   nameArabic: z.string().trim().min(1),
-  code: z.string().trim().min(1),
+  // Desktop registration may omit this; the server is the source of truth for branch identity.
+  code: z.string().trim().min(1).max(80).optional(),
   address: z.string().optional().default(""),
   phone: z.string().optional().default(""),
   email: z.string().optional().default(""),
@@ -40,14 +41,16 @@ router.post("/register-school", registrationRateLimit, async (req, res) => {
     }
 
     const parsed = registrationSchema.safeParse(req.body ?? {});
-    if (!parsed.success) return res.status(400).json({ error: "Name, nameArabic, and code are required; student credentials must have a username and a password of at least 8 characters" });
-    const { name, nameArabic, code, address, phone, email, principalName, establishedDate, studentAccess } = parsed.data;
+    if (!parsed.success) return res.status(400).json({ error: "Name and nameArabic are required; student credentials must have a username and a password of at least 8 characters" });
+    const { name, nameArabic, address, phone, email, principalName, establishedDate, studentAccess } = parsed.data;
     const schools = await getCollection<SchoolDocument>(collections.schools);
+    const schoolId = await nextId("schools");
+    const code = parsed.data.code?.trim().toUpperCase() || `BASSAM-${String(schoolId).padStart(4, "0")}`;
     if (await schools.findOne({ code })) return res.status(409).json({ error: "School code already exists" });
 
     const apiKey = generateApiKey(); const now = new Date();
     const school = {
-      id: await nextId("schools"), name, nameArabic, code, address, phone, email, principalName, establishedDate,
+      id: schoolId, name, nameArabic, code, address, phone, email, principalName, establishedDate,
       apiKey: null, apiKeyHash: crypto.createHash("sha256").update(apiKey).digest("hex"), apiKeyPrefix: apiKey.slice(0, 11),
       isActive: true, createdAt: now, updatedAt: now,
     } as SchoolDocument;
