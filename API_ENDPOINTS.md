@@ -11,14 +11,14 @@
 | Method | Endpoint | Auth | Description | Example Request/Response |
 |--------|----------|------|-------------|---------------------------|
 | GET | `/api/healthz` | None | Health check | Response: `{ "status": "ok" }` |
-| POST | `/api/register-school` | None | Register a new school | Request: `{ "name": "School Name", "nameArabic": "المدرسة", "code": "SCHOOL001", ... }` |
+| POST | `/api/register-school` | Desktop API Key; registration secret unless public registration is enabled | Register a new school | Request: `{ "name": "School Name", "nameArabic": "المدرسة", "code": "SCHOOL001", ... }` |
 | POST | `/api/student/login` | None | Student login | Request: `{ "schoolCode": "SCHOOL001", "password": "password123" }`<br>Response: `{ "token": "jwt_token_here" }` |
 
 ## Admin Endpoints (API Key Required)
 
 | Method | Endpoint | Auth | Description | Example Request/Response |
 |--------|----------|------|-------------|---------------------------|
-| PUT | `/api/admin/student-access` | API Key | Set/rotate student password | Request: `{ "password": "newpassword123" }`<br>Response: `{ "success": true }` |
+| PUT | `/api/admin/student-access` | Desktop API Key + School API Key | Set/rotate student password | Request: `{ "password": "newpassword123" }`<br>Response: `{ "success": true }` |
 | GET | `/api/dashboard/summary` | API Key | Get dashboard summary | Response: `{ "students": 100, "teachers": 20, "books": 500, ... }` |
 | GET | `/api/students` | API Key | List students | Query: `?search=John&status=active`<br>Response: `[{ "id": 1, "fullName": "John Doe", ... }]` |
 | POST | `/api/students` | API Key | Create student | Request: `{ "fullName": "John Doe", "fullNameArabic": "...", "studentNumber": "123", ... }` |
@@ -43,7 +43,7 @@
 | GET | `/api/attendance` | API Key | List attendance | Query: `?academicYearId=1&studentId=1&from=2024-01-01&to=2024-12-31` |
 | POST | `/api/attendance` | API Key | Create attendance record | Request: `{ "studentId": 1, "academicYearId": 1, "attendanceDate": "2024-01-01", "status": "present" }` |
 | GET | `/api/academic-years` | API Key | List academic years | Response: `[{ "id": 1, "label": "2024 / 2025", "isCurrent": true, ... }]` |
-| POST | `/api/library/sync` | API Key | Sync library data | Request: `{ "books": [...], "borrows": [...] }` |
+| GET, POST | `/api/sync/library` | Desktop API Key + School API Key | Read/write the cloud library snapshot used by student-library routes | POST request: `{ "books": [...], "borrows": [...], "deletedBooks": [1], "deletedBorrows": [1], "syncedAt": "..." }`; response: `{ "success": true, "strategy": "desktop-wins", "counts": { "books": 0, "borrows": 0, "deletedBooks": 0, "deletedBorrows": 0 } }` |
 | GET | `/api/library/student-data` | API Key | Get student library data from MongoDB | Response: `{ "books": [...], "borrows": [...] }` |
 | GET | `/api/borrows/due-today` | API Key | Get borrows due today | Response: `[{ "id": 1, "bookTitle": "...", "dueDate": "2024-01-01", ... }]` |
 
@@ -83,7 +83,7 @@
 
 ## CORS Configuration
 
-- Allowed origins: Configured via `FRONTEND_URL` environment variable
+- The current server reflects the request origin; `FRONTEND_URL` is documented as a deployment setting but is not currently enforced as an allowlist.
 - Allowed methods: GET, POST, PATCH, DELETE, PUT, OPTIONS
-- Allowed headers: Content-Type, Authorization, X-API-Key
-- Credentials: supported
+- Allowed headers: Content-Type, Authorization, X-API-Key, X-App-API-Key, X-Registration-Secret
+- Credentials: disabled; clients authenticate with headers, not cookies.

@@ -45,10 +45,10 @@ Configure these values in Vercel **Project Settings → Environment Variables**.
 | `DATABASE_URL` | Required | PostgreSQL connection string. The DB module checks this when the app loads; the health route also requires it to be set. Prefer a serverless-friendly connection pooler where appropriate. |
 | `MONGODB_URI` | Needed for library data routes | MongoDB connection string. |
 | `MONGODB_DB` | Optional | Defaults to `al_bassam_school`. |
-| `FRONTEND_URL` | Needed for browser clients | Exact deployed web app origin allowed by CORS; multiple origins may be comma-separated, for example `https://school.example,https://admin.example`. |
-| `ALLOW_PUBLIC_REGISTRATION` | Required for registration policy | Set to `true` only when unauthenticated registration should be enabled. Any other value blocks registration. |
-| `REGISTRATION_SECRET` | Required when public registration is enabled | Secret sent as `X-Registration-Secret` for `POST /api/register-school`. Keep it in Vercel secrets. |
-| `api_key` | Required for desktop-only routes | Shared server-side key expected in `X-App-API-Key` for `/api/register-school`, `/api/school-info`, and `/api/sync/*` desktop routes. Keep it in Vercel secrets. |
+| `FRONTEND_URL` | Optional | Currently not enforced as a CORS allowlist; the server reflects request origins. Do not treat CORS as an authentication boundary. |
+| `ALLOW_PUBLIC_REGISTRATION` | Required for registration policy | Set to `true` to enable registration without a registration secret; any other value requires the configured secret. Registration still requires the desktop app key. |
+| `REGISTRATION_SECRET` | Required unless public registration is enabled | Secret sent as `X-Registration-Secret` for `POST /api/register-school`. Keep it in Vercel secrets. |
+| `api_key` | Required | Shared server-side key expected in `X-App-API-Key` for registration, `/api/school-info`, `/api/sync/*`, and `/api/admin/*`. Keep it in Vercel secrets and embed the matching value in the desktop build. |
 | `MISTRAL_API_KEY` | Optional | Enables chat; without it, the chat endpoint returns 503. Store secrets only in Vercel, not in Git. |
 | `MISTRAL_MODEL` | Optional | Defaults to `mistral-small-latest`. |
 | `LOG_LEVEL` | Optional | Defaults to `info`. |
@@ -59,16 +59,17 @@ After deployment, verify `GET https://<deployment>/api/healthz` returns `{"statu
 
 ## API endpoints
 
-Public endpoints:
+Public/no-school-key endpoints:
 
 - `GET /api/healthz` — health check
-- `POST /api/register-school` — register a school; requires registration to be enabled and the configured `X-Registration-Secret`, and is rate limited to 5 attempts per IP per 15 minutes
+- `POST /api/register-school` — register a school; requires `X-App-API-Key` and, unless `ALLOW_PUBLIC_REGISTRATION=true`, the configured `X-Registration-Secret`; rate limited to 5 attempts per IP per 15 minutes
+- `POST /api/student/login` — student sign-in; returns a short-lived student JWT
 
 Authenticated endpoints (send `X-API-Key`):
 
 - `GET /api/school-info`
 - `GET /api/library/student-data`
-- `POST /api/library/sync`
+- `GET|POST /api/sync/library` — desktop-to-cloud library snapshot sync used by student-library reads; requires both `X-App-API-Key` and `X-API-Key`
 - `GET|POST /api/students`, `DELETE /api/students/:id`
 - `GET|POST /api/teachers`, `DELETE /api/teachers/:id`
 - `GET|POST|PATCH|DELETE /api/library/books` and `/api/library/books/:id`
@@ -77,15 +78,16 @@ Authenticated endpoints (send `X-API-Key`):
 - `GET /api/academic-years`, `/api/dashboard/summary`, and `/api/borrows/due-today`
 - `POST /api/chat`
 
-Every `/api` route except health and registration requires a valid active school API key. CORS preflight requests are handled before API-key authentication, and requests without an `Origin` header remain allowed for the desktop app. The API key is resolved to the school for every request; library sync never falls back to a default school.
+Every `/api` route except health, registration, and student login requires a valid active school API key. `/api/admin/*`, `/api/school-info`, `/api/sync/*`, and registration also require the desktop app key. CORS preflight requests are handled before authentication, and requests without an `Origin` header remain allowed for the desktop app. The school API key is resolved to the school for each request; library sync never falls back to a default school. CORS reflects request origins and disables cookies; both API keys must remain secret.
 
 ### Desktop library sync
 
-The desktop app sends its school key on every sync request:
+The desktop app sends both its server-configured desktop key and its school key. This endpoint writes to the MongoDB collections used by `/api/student/library/books`; `/api/library/sync` is the separate legacy relational-data endpoint.
 
 ```bash
-curl -X POST https://<api-deployment>/api/library/sync \
+curl -X POST https://<api-deployment>/api/sync/library \
   -H "Content-Type: application/json" \
+  -H "X-App-API-Key: <desktop-app-key>" \
   -H "X-API-Key: sk-your-school-key" \
   -d '{"books": [], "borrows": []}'
 ```
@@ -102,7 +104,7 @@ The API supports multiple schools with data isolation. Each school has:
 
 ### First-Time Setup
 
-Registration is blocked unless `ALLOW_PUBLIC_REGISTRATION=true` and the request includes `X-Registration-Secret` matching `REGISTRATION_SECRET`. This protects school creation from strangers; keep public registration disabled after onboarding when possible.
+The desktop API key is always required for registration. When `ALLOW_PUBLIC_REGISTRATION` is not `true`, the request must also include `X-Registration-Secret` matching `REGISTRATION_SECRET`; when it is `true`, the registration-secret check is bypassed. Keep public registration disabled after onboarding when possible.
 
 When setting up a new school:
 
@@ -110,6 +112,8 @@ When setting up a new school:
 ```bash
 curl -X POST http://localhost:3000/api/register-school \
   -H "Content-Type: application/json" \
+  -H "X-App-API-Key: <desktop-app-key>" \
+  -H "X-Registration-Secret: <registration-secret>" \
   -d '{
     "name": "My School",
     "nameArabic": "مدرستي",
@@ -131,7 +135,7 @@ curl -H "X-API-Key: sk-your-api-key-here" \
 
 ### API Key Authentication
 
-All API endpoints (except `/api/healthz` and `/api/register-school`) require authentication via the `X-API-Key` header:
+School data endpoints require `X-API-Key`; `/api/healthz`, `/api/register-school`, and `/api/student/login` are exceptions. Desktop registration, `/api/school-info`, `/api/sync/*`, and `/api/admin/*` additionally require `X-App-API-Key`:
 
 - **Header**: `X-API-Key: sk-your-api-key-here`
 - **Security**: Each school has a unique key; never share it

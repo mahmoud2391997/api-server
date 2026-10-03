@@ -1,9 +1,17 @@
 import { collections, getCollection, type BookDocument, type BorrowDocument } from "../db/mongo.js";
 
-export type LibrarySyncPayload = { books: Array<Record<string, unknown>>; borrows: Array<Record<string, unknown>>; syncedAt?: string };
+export type LibrarySyncPayload = {
+  books: Array<Record<string, unknown>>;
+  borrows: Array<Record<string, unknown>>;
+  deletedBooks?: number[];
+  deletedBorrows?: number[];
+  syncedAt?: string;
+};
 
 export async function syncLibraryToMongo(payload: LibrarySyncPayload & { schoolId: number }): Promise<boolean> {
   const books = await getCollection<BookDocument>(collections.books); const borrows = await getCollection<BorrowDocument>(collections.borrows); const now = payload.syncedAt ? new Date(payload.syncedAt) : new Date();
+  if (payload.deletedBooks?.length) await books.deleteMany({ schoolId: payload.schoolId, id: { $in: payload.deletedBooks } });
+  if (payload.deletedBorrows?.length) await borrows.deleteMany({ schoolId: payload.schoolId, id: { $in: payload.deletedBorrows } });
   for (const raw of payload.books) {
     const id = Number(raw.id); const document = { ...raw, id: Number.isInteger(id) ? id : undefined, schoolId: payload.schoolId, syncedAt: now } as unknown as BookDocument;
     if (document.id) await books.updateOne({ id: document.id, schoolId: payload.schoolId }, { $set: document }, { upsert: true }); else await books.insertOne({ ...document, id: Date.now() } as BookDocument);
