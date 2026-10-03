@@ -54,4 +54,28 @@ describe("authentication boundaries", () => {
     expect(response.status).toBe(401);
     await expect(response.json()).resolves.toEqual({ error: "Desktop API key is required" });
   });
+
+  it("requires the school API key after the desktop key is accepted", async () => {
+    const response = await fetch(`${baseUrl}/api/sync/library`, {
+      headers: { "X-App-API-Key": "test-desktop-key" },
+    });
+
+    expect(response.status).toBe(401);
+    await expect(response.json()).resolves.toEqual({ error: "API key is required" });
+  });
+
+  it("allows CORS preflight for both sync authentication headers", async () => {
+    const response = await fetch(`${baseUrl}/api/sync/library`, {
+      method: "OPTIONS",
+      headers: {
+        Origin: "https://school.example",
+        "Access-Control-Request-Method": "POST",
+        "Access-Control-Request-Headers": "content-type,x-api-key,x-app-api-key",
+      },
+    });
+
+    expect(response.status).toBe(204);
+    expect(response.headers.get("access-control-allow-headers")).toContain("X-API-Key");
+    expect(response.headers.get("access-control-allow-headers")).toContain("X-App-API-Key");
+  });
 });

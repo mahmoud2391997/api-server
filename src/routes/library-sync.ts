@@ -36,17 +36,23 @@ router.post("/sync/library", async (req: AuthenticatedRequest, res) => {
   const schoolId = getSchoolId(req, res);
   if (schoolId === null) return;
 
-  const { books, borrows, syncedAt } = req.body ?? {};
+  const { books, borrows, deletedBooks = [], deletedBorrows = [], syncedAt } = req.body ?? {};
   if (
     !Array.isArray(books) ||
     !Array.isArray(borrows) ||
+    !Array.isArray(deletedBooks) ||
+    !Array.isArray(deletedBorrows) ||
     books.length > MAX_RECORDS_PER_COLLECTION ||
     borrows.length > MAX_RECORDS_PER_COLLECTION ||
+    deletedBooks.length > MAX_RECORDS_PER_COLLECTION ||
+    deletedBorrows.length > MAX_RECORDS_PER_COLLECTION ||
     books.some((record) => !record || typeof record !== "object" || Array.isArray(record)) ||
-    borrows.some((record) => !record || typeof record !== "object" || Array.isArray(record))
+    borrows.some((record) => !record || typeof record !== "object" || Array.isArray(record)) ||
+    deletedBooks.some((id) => !Number.isInteger(id) || id < 1) ||
+    deletedBorrows.some((id) => !Number.isInteger(id) || id < 1)
   ) {
     return res.status(400).json({
-      error: "books and borrows must be arrays of objects within the allowed size",
+      error: "books and borrows must be arrays of objects; deletion ID arrays must contain positive integers within the allowed size",
     });
   }
 
@@ -54,6 +60,8 @@ router.post("/sync/library", async (req: AuthenticatedRequest, res) => {
     schoolId,
     books,
     borrows,
+    deletedBooks,
+    deletedBorrows,
     ...(typeof syncedAt === "string" ? { syncedAt } : {}),
   };
 
@@ -66,7 +74,12 @@ router.post("/sync/library", async (req: AuthenticatedRequest, res) => {
       success: true,
       strategy: "desktop-wins",
       syncedAt: payload.syncedAt ?? new Date().toISOString(),
-      counts: { books: books.length, borrows: borrows.length },
+      counts: {
+        books: books.length,
+        borrows: borrows.length,
+        deletedBooks: deletedBooks.length,
+        deletedBorrows: deletedBorrows.length,
+      },
     });
   } catch (error) {
     return res.status(500).json({ error: "Unable to sync library data" });
