@@ -27,19 +27,22 @@ router.post("/login", async (req, res): Promise<void> => {
         if (student && await argon2.verify(candidate.passwordHash, parsed.data.password)) access = candidate;
       }
     }
-    // Preserve the existing shared-account login for schools migrating to per-student credentials.
+    // Preserve legacy shared accounts, while honoring usernames provisioned during school registration.
     let sharedAuthenticated = false;
+    let sharedUsername: string | undefined;
     if (!access) {
+      const legacyShared = await accesses.findOne({ schoolId: school.id, mode: { $ne: "individual" }, isActive: true });
+      const requestedUsername = username?.toLowerCase();
+      const usernameMatches = !legacyShared?.username || requestedUsername === legacyShared.username.toLowerCase();
       const [shared] = await db.select().from(studentAccessTable).where(and(
         eq(studentAccessTable.schoolId, school.id),
         eq(studentAccessTable.mode, "shared"),
         eq(studentAccessTable.isActive, true),
       )).limit(1);
-      sharedAuthenticated = Boolean(shared && await argon2.verify(shared.passwordHash, parsed.data.password));
-      if (!sharedAuthenticated) {
-        const legacyShared = await accesses.findOne({ schoolId: school.id, mode: { $ne: "individual" }, isActive: true });
-        sharedAuthenticated = Boolean(legacyShared && await argon2.verify(legacyShared.passwordHash, parsed.data.password));
-      }
+      const relationalMatch = Boolean(shared && usernameMatches && await argon2.verify(shared.passwordHash, parsed.data.password));
+      const legacyMatch = Boolean(legacyShared && usernameMatches && await argon2.verify(legacyShared.passwordHash, parsed.data.password));
+      sharedAuthenticated = relationalMatch || legacyMatch;
+      if (sharedAuthenticated) sharedUsername = legacyShared?.username;
     }
     if (!access && !sharedAuthenticated) { res.status(401).json({ error: "Invalid credentials" }); return; }
     const secret = process.env.JWT_SECRET; if (!secret) { res.status(500).json({ error: "Server configuration error" }); return; }
@@ -50,7 +53,7 @@ router.post("/login", async (req, res): Promise<void> => {
       school: { name: school.name, code: school.code },
       student: access?.mode === "individual" && student
         ? { id: student.id, username: access.username, fullName: student.fullName }
-        : { username: "student" },
+        : { username: sharedUsername || "student" },
     });
   } catch (error) { logger.error({ err: error }, "Student login error"); res.status(500).json({ error: "Login failed" }); }
 });

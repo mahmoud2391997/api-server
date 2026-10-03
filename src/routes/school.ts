@@ -1123,6 +1123,7 @@ router.put("/admin/student-access", async (req, res): Promise<void> => {
   }
 
   const schema = z.object({
+    username: z.string().trim().min(3).max(80).optional(),
     password: z.string().min(8),
   });
 
@@ -1132,7 +1133,7 @@ router.put("/admin/student-access", async (req, res): Promise<void> => {
     return;
   }
 
-  const { password } = parsed.data;
+  const { username, password } = parsed.data;
 
   try {
     // Hash the password
@@ -1164,7 +1165,21 @@ router.put("/admin/student-access", async (req, res): Promise<void> => {
       });
     }
 
-    logger.info({ schoolId }, "Student access password updated");
+    const accessCollection = await getCollection<StudentAccessDocument>(collections.studentAccess);
+    const mongoShared = await accessCollection.findOne({ schoolId, mode: { $ne: "individual" }, isActive: true });
+    if (mongoShared) {
+      await accessCollection.updateOne(
+        { id: mongoShared.id, schoolId },
+        { $set: { ...(username ? { username } : {}), passwordHash, isActive: true, updatedAt: new Date() } },
+      );
+    } else {
+      await accessCollection.insertOne({
+        id: await nextId("student_access"), schoolId, mode: "shared", ...(username ? { username } : {}),
+        passwordHash, isActive: true, createdAt: new Date(), updatedAt: new Date(),
+      } as StudentAccessDocument);
+    }
+
+    logger.info({ schoolId }, "Student access credentials updated");
     res.json({ success: true });
   } catch (error) {
     logger.error({ err: error, schoolId }, "Student access update error");
